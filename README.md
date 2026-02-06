@@ -1,5 +1,5 @@
 # Unified Security Event Pipeline for Enterprise Threat Detection
-**CS 4265: Big Data Analytics — Milestone 1 Submission**
+** Big Data Analytics **
 
 ##  Overview
 This project implements a scalable distributed data pipeline designed to ingest, process, and enrich massive enterprise-scale security telemetry. By correlating the **LANL Unified Host and Network Dataset** (~700M events) with real-time threat intelligence feeds (URLHaus), the system enables the detection of sophisticated cyber threats such as lateral movement and compromised credentials.
