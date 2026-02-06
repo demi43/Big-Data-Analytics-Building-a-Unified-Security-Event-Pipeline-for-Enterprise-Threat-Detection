@@ -1,0 +1,24 @@
+# Spark / Hadoop
+*.log
+*.out
+*.pid
+*.crc
+__pycache__/
+*.pyc
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data (never commit large datasets)
+data/raw/
+data/lanl/
+*.csv
+*.parquet
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Virtual env
+venv/
+.env
