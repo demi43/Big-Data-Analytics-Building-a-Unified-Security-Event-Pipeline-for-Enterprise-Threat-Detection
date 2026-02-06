@@ -15,6 +15,9 @@ The architecture is designed to handle the **Volume, Variety, and Velocity** of 
 | **Syntax** | Apache Parquet | Columnar Storage with Snappy Compression |
 | **Querying** | Spark SQL / DataFrames | Distributed Execution & Partition-aware Querying |
 
+##  LANL User-Computer Auth logs (CSV) [https://csr.lanl.gov/data/cyber1/],
+LANL Unified Host/Network logs (CSV) [https://csr.lanl.gov/data/auth/], and 
+URLHaus API threat feeds (JSON) [https://urlhaus.abuse.ch/api/].
 ## Project Structure
 ```text
 /
