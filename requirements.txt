@@ -1,0 +1,12 @@
+#
+# Python dependencies for the Unified Security Event Pipeline (M2 baseline)
+#
+# Core big-data / processing stack
+pyspark
+
+# Data handling and utilities
+pandas
+pyarrow
+requests
+python-dotenv
+
