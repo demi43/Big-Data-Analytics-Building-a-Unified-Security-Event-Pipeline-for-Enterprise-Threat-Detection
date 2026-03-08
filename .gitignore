@@ -12,6 +12,8 @@ __pycache__/
 # Data (never commit large datasets)
 data/raw/
 data/lanl/
+data/*.gz
+data/*.bz2
 *.csv
 *.parquet
 
