@@ -1,0 +1,368 @@
+{
+  "query_status": "ok",
+  "urls": [
+    {
+      "id": 3792550,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792550/",
+      "url": "https://coffetime.xyz/crs/SeattleMass.exe",
+      "url_status": "online",
+      "host": "coffetime.xyz",
+      "date_added": "2026-03-08 19:28:14 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "botnet_cc_domain",
+        "surbl": "not listed"
+      },
+      "reporter": "abuse_ch",
+      "larted": "false",
+      "tags": [
+        "exe"
+      ]
+    },
+    {
+      "id": 3792549,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792549/",
+      "url": "https://144.172.110.191:53663/kunkun/jquery-3.3.1.min.js_",
+      "url_status": "offline",
+      "host": "144.172.110.191",
+      "date_added": "2026-03-08 19:28:05 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "not listed",
+        "surbl": "not listed"
+      },
+      "reporter": "abus3reports",
+      "larted": "false",
+      "tags": null
+    },
+    {
+      "id": 3792548,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792548/",
+      "url": "http://115.48.163.28:34431/i",
+      "url_status": "online",
+      "host": "115.48.163.28",
+      "date_added": "2026-03-08 19:26:10 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "not listed",
+        "surbl": "not listed"
+      },
+      "reporter": "geenensp",
+      "larted": "true",
+      "tags": [
+        "32-bit",
+        "elf",
+        "mips",
+        "Mozi"
+      ]
+    },
+    {
+      "id": 3792547,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792547/",
+      "url": "https://semi-flow.conesemison.in.net/verification.google",
+      "url_status": "online",
+      "host": "semi-flow.conesemison.in.net",
+      "date_added": "2026-03-08 19:25:11 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "abused_legit_malware",
+        "surbl": "listed"
+      },
+      "reporter": "anonymous",
+      "larted": "true",
+      "tags": [
+        "ClearFake",
+        "EternalRocks"
+      ]
+    },
+    {
+      "id": 3792546,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792546/",
+      "url": "http://112.248.104.126:34417/bin.sh",
+      "url_status": "online",
+      "host": "112.248.104.126",
+      "date_added": "2026-03-08 19:21:09 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "not listed",
+        "surbl": "not listed"
+      },
+      "reporter": "geenensp",
+      "larted": "true",
+      "tags": [
+        "32-bit",
+        "elf",
+        "mips",
+        "Mozi"
+      ]
+    },
+    {
+      "id": 3792545,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792545/",
+      "url": "https://cone-sync.conesemison.in.net/verification.google",
+      "url_status": "online",
+      "host": "cone-sync.conesemison.in.net",
+      "date_added": "2026-03-08 19:17:12 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "abused_legit_malware",
+        "surbl": "listed"
+      },
+      "reporter": "anonymous",
+      "larted": "true",
+      "tags": [
+        "ClearFake",
+        "EternalRocks"
+      ]
+    },
+    {
+      "id": 3792544,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792544/",
+      "url": "http://27.202.52.63:56269/i",
+      "url_status": "online",
+      "host": "27.202.52.63",
+      "date_added": "2026-03-08 19:16:17 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "not listed",
+        "surbl": "not listed"
+      },
+      "reporter": "geenensp",
+      "larted": "true",
+      "tags": [
+        "32-bit",
+        "elf",
+        "mips",
+        "Mozi"
+      ]
+    },
+    {
+      "id": 3792543,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792543/",
+      "url": "https://thekingofarms.com/sssrtq.exe",
+      "url_status": "online",
+      "host": "thekingofarms.com",
+      "date_added": "2026-03-08 19:16:12 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "botnet_cc_domain",
+        "surbl": "not listed"
+      },
+      "reporter": "abuse_ch",
+      "larted": "true",
+      "tags": [
+        "exe"
+      ]
+    },
+    {
+      "id": 3792542,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792542/",
+      "url": "https://shiftspace.creativemindsuaeu.com/wp-content/plugins/xvbmiag/pbbpojm.txt",
+      "url_status": "offline",
+      "host": "shiftspace.creativemindsuaeu.com",
+      "date_added": "2026-03-08 19:15:13 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "not listed",
+        "surbl": "not listed"
+      },
+      "reporter": "abuse_ch",
+      "larted": "false",
+      "tags": [
+        "ascii"
+      ]
+    },
+    {
+      "id": 3792541,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792541/",
+      "url": "http://115.48.163.28:34431/bin.sh",
+      "url_status": "online",
+      "host": "115.48.163.28",
+      "date_added": "2026-03-08 19:13:19 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "not listed",
+        "surbl": "not listed"
+      },
+      "reporter": "geenensp",
+      "larted": "true",
+      "tags": [
+        "32-bit",
+        "elf",
+        "mips",
+        "Mozi"
+      ]
+    },
+    {
+      "id": 3792540,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792540/",
+      "url": "https://files.catbox.moe/jsrzb0.msi",
+      "url_status": "online",
+      "host": "files.catbox.moe",
+      "date_added": "2026-03-08 19:11:29 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "abused_legit_malware",
+        "surbl": "not listed"
+      },
+      "reporter": "abuse_ch",
+      "larted": "true",
+      "tags": [
+        "GoToResolve",
+        "msi"
+      ]
+    },
+    {
+      "id": 3792539,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792539/",
+      "url": "https://semi-v08.conesemison.in.net/verification.google",
+      "url_status": "online",
+      "host": "semi-v08.conesemison.in.net",
+      "date_added": "2026-03-08 19:10:09 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "abused_legit_malware",
+        "surbl": "listed"
+      },
+      "reporter": "anonymous",
+      "larted": "true",
+      "tags": [
+        "ClearFake",
+        "EternalRocks"
+      ]
+    },
+    {
+      "id": 3792538,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792538/",
+      "url": "http://27.202.52.63:56269/bin.sh",
+      "url_status": "online",
+      "host": "27.202.52.63",
+      "date_added": "2026-03-08 19:09:50 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "not listed",
+        "surbl": "not listed"
+      },
+      "reporter": "geenensp",
+      "larted": "true",
+      "tags": [
+        "32-bit",
+        "elf",
+        "mips",
+        "Mozi"
+      ]
+    },
+    {
+      "id": 3792534,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792534/",
+      "url": "https://172.86.89.251/access/Remote%20Access-macos-intel-offline.dmg?language=en",
+      "url_status": "online",
+      "host": "172.86.89.251",
+      "date_added": "2026-03-08 19:09:30 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "not listed",
+        "surbl": "not listed"
+      },
+      "reporter": "abus3reports",
+      "larted": "true",
+      "tags": null
+    },
+    {
+      "id": 3792535,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792535/",
+      "url": "https://144.172.91.253/access/Remote%20Access-windows32-offline.exe?language=en",
+      "url_status": "online",
+      "host": "144.172.91.253",
+      "date_added": "2026-03-08 19:09:30 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "not listed",
+        "surbl": "not listed"
+      },
+      "reporter": "abus3reports",
+      "larted": "true",
+      "tags": null
+    },
+    {
+      "id": 3792536,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792536/",
+      "url": "https://144.172.91.253/access/Remote%20Access-macos-intel-offline.dmg?language=en",
+      "url_status": "online",
+      "host": "144.172.91.253",
+      "date_added": "2026-03-08 19:09:30 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "not listed",
+        "surbl": "not listed"
+      },
+      "reporter": "abus3reports",
+      "larted": "true",
+      "tags": null
+    },
+    {
+      "id": 3792537,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792537/",
+      "url": "https://download-app-service-conect.info/android",
+      "url_status": "online",
+      "host": "download-app-service-conect.info",
+      "date_added": "2026-03-08 19:09:30 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "spammer_domain",
+        "surbl": "listed"
+      },
+      "reporter": "abus3reports",
+      "larted": "true",
+      "tags": null
+    },
+    {
+      "id": 3792533,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792533/",
+      "url": "https://45.61.151.206/access/Remote%20Access-macos-offline.dmg?language=en",
+      "url_status": "online",
+      "host": "45.61.151.206",
+      "date_added": "2026-03-08 19:09:29 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "not listed",
+        "surbl": "not listed"
+      },
+      "reporter": "abus3reports",
+      "larted": "true",
+      "tags": null
+    },
+    {
+      "id": 3792530,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792530/",
+      "url": "https://bulledesophros.top/access/Remote%20Access-macos-intel-offline.dmg?language=en",
+      "url_status": "online",
+      "host": "bulledesophros.top",
+      "date_added": "2026-03-08 19:09:18 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "abused_legit_malware",
+        "surbl": "listed"
+      },
+      "reporter": "abus3reports",
+      "larted": "true",
+      "tags": null
+    },
+    {
+      "id": 3792531,
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792531/",
+      "url": "https://172.86.89.251/access/Remote%20Access-macos-offline.dmg?language=en",
+      "url_status": "online",
+      "host": "172.86.89.251",
+      "date_added": "2026-03-08 19:09:18 UTC",
+      "threat": "malware_download",
+      "blacklists": {
+        "spamhaus_dbl": "not listed",
+        "surbl": "not listed"
+      },
+      "reporter": "abus3reports",
+      "larted": "true",
+      "tags": null
+    }
+  ]
+}

@@ -77,7 +77,7 @@ No pivot from M1 design; current work is local proof-of-concept (samples, persis
 
 ## Environment
 
-- Copy `.env.example` to `.env` and set any variables you need (e.g. for API access). No API keys are required to run sample data generation from local files.
+- Copy `.env.example` to `.env` and set `URLHAUS_API_KEY` for the URLHaus fetch script (free key at [auth.abuse.ch](https://auth.abuse.ch/)). Sample generation from local files does not require any keys.
 - Do **not** commit `.env` or real credentials; `.env` is listed in `.gitignore`.
 
 ## Project Structure
@@ -87,6 +87,7 @@ No pivot from M1 design; current work is local proof-of-concept (samples, persis
 ├── data/                   # Raw/compressed LANL-style files (not committed; place *.gz, *.bz2 here)
 ├── sample data/            # Generated CSV samples (committed): auth_sample.txt, dns_sample.txt, etc.
 ├── scripts/                # Standalone runnable scripts
+│   ├── fetch_urlhaus.py    # Fetch recent URLs from URLHaus API → sample data/urlhaus_sample.json
 │   └── create_samples.py   # Build samples from data/ → sample data/
 ├── src/                    # Core pipeline source code (planned)
 │   ├── ingestion/          # PySpark jobs for moving raw logs into HDFS
@@ -104,7 +105,7 @@ No pivot from M1 design; current work is local proof-of-concept (samples, persis
 ## Storage
 
 - **Raw / compressed data:** Place LANL-style files (e.g. `dns.txt.gz`, `flows.txt.gz`, `proc.txt.gz`, `lanl-auth-dataset-1.bz2`) in `data/`. These are not committed (see `.gitignore`).
-- **Sample data:** Generated samples (e.g. `auth_sample.txt`, `dns_sample.txt`, `flows_sample.txt`, `proc_sample.txt`) are written to `sample data/` and are committed for pipeline testing.
+- **Sample data:** Generated samples in `sample data/`: LANL-style CSVs (`auth_sample.txt`, `dns_sample.txt`, `flows_sample.txt`, `proc_sample.txt`) and URLHaus JSON (`urlhaus_sample.json`) from `scripts/fetch_urlhaus.py`. These are committed for pipeline testing and M2 evidence.
 
 ## Data Pipeline Workflow
 Ingestion (Bronze): Raw CSV logs from Los Alamos National Lab (LANL) are loaded into HDFS blocks.
@@ -122,18 +123,23 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
 
 ## How to run
 
-- **Create sample data (local):** From project root, run `python scripts/create_samples.py`. Use `--lines 1000` for a small sample suitable for git.
+- **Fetch URLHaus threat feed (data acquisition):** Set `URLHAUS_API_KEY` in `.env` (get a free key at [auth.abuse.ch](https://auth.abuse.ch/)), then from project root:
+  ```bash
+  python scripts/fetch_urlhaus.py
+  ```
+  Saves `sample data/urlhaus_sample.json` (default 20 URLs). Use `--limit 50` for more. Console output and the saved file are evidence of working acquisition.
+- **Create sample data (LANL-style local files):** From project root, run `python scripts/create_samples.py`. Use `--lines 1000` for a small sample suitable for git.
 - **Full pipeline (planned):** Data ingestion via `src/ingestion/load_lanl.py`, processing via `src/processing/enrich_logs.py`, analysis in `notebooks/` — to be wired in later milestones.
 
 ## Current status
 
-| Component                       | Status                                                       |
-| ------------------------------- | ------------------------------------------------------------ |
-| Sample data generation          | Done (`scripts/create_samples.py`, output in `sample data/`) |
-| Persistent storage              | Done (sample data and raw data paths documented above)       |
-| Data acquisition (API/download) | Planned (M2)                                                 |
-| Pipeline orchestration          | Planned (M2)                                                 |
-| Processing / enrichment         | Planned (M3)                                                 |
+| Component                       | Status                                                                 |
+| ------------------------------- | ---------------------------------------------------------------------- |
+| Data acquisition (URLHaus API)  | Done (`scripts/fetch_urlhaus.py`, output `sample data/urlhaus_sample.json`) |
+| Sample data generation          | Done (`scripts/create_samples.py`, output in `sample data/`)           |
+| Persistent storage              | Done (sample data and raw data paths documented above)               |
+| Pipeline orchestration          | Planned (M2)                                                           |
+| Processing / enrichment         | Planned (M3)                                                           |
 
 ## Getting Started (full pipeline, future)
 
