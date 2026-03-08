@@ -37,6 +37,13 @@ Normalization (Silver): Spark DataFrames enforce schema validation and normalize
 Enrichment (Gold): A Broadcast Hash Join correlates host activity with malicious URL feeds to identify Indicators of Compromise (IoCs).
 Indexing: Enriched events are stored in HBase, utilizing a custom row-key design to prevent region hotspotting and enable low-latency lookups.
 
+Creating data samples (local)
+To build small CSV samples from the compressed data in `data/` (for local runs and notebooks), use:
+```bash
+python scripts/create_samples.py
+```
+Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compress` to write `.gz`, `--seed 42` when using `--random`. Outputs go to `sample data/` (e.g. `dns_sample.txt`, `flows_sample.txt`, `proc_sample.txt`, `auth_sample.txt`).
+
 Getting Started
 Data Ingestion: Execute src/ingestion/load_lanl.py to stage raw telemetry.
 Pipeline Execution: Run src/processing/enrich_logs.py to trigger the distributed enrichment job.
