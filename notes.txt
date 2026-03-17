@@ -1,0 +1,51 @@
+Parquet write issue on Windows (HADOOP_HOME / winutils)
+=======================================================
+
+Context
+-------
+- While running `src/processing/auth_to_parquet.py` to write the LANL auth dataset to Parquet (Silver layer), Spark failed with a `Py4JJavaError`.
+- Root cause from the Java stack trace:
+  - `java.io.FileNotFoundException: HADOOP_HOME and hadoop.home.dir are unset.`
+  - `Did not find winutils.exe` warnings in the log.
+- This happens when Spark (via Hadoop's RawLocalFileSystem) tries to create output / temp directories and set permissions on Windows.
+
+Why this happens
+----------------
+- On Windows, Hadoop's filesystem code expects a native helper binary `winutils.exe` and a configured `HADOOP_HOME` directory.
+- If `HADOOP_HOME` and `hadoop.home.dir` are not set, and `winutils.exe` is not found, directory creation with permission setting can fail with a hard error, not just a warning.
+- Reads (CSV/bz2) often work with only WARN messages, but **writes** to filesystems (like Parquet output) go deeper into the Hadoop FS stack and can throw exceptions.
+
+Effect on the project
+---------------------
+- All four LANL sources (auth, dns, flows, proc) are successfully ingested into Spark DataFrames and verified:
+  - Auth: ~708M rows, 18 partitions.
+  - DNS: ~40.8M rows, 1 partition.
+  - Flows: schema as documented, sample rows verified.
+  - Proc: ~426M process events, 1 partition.
+- URLHaus acquisition works and writes `sample data/urlhaus_sample.json`.
+- Attempting to write the Silver layer for auth to Parquet (e.g. `data/silver/auth/`) currently fails on this Windows machine due to the missing `HADOOP_HOME` / `winutils.exe` setup.
+
+Options to resolve (future work)
+--------------------------------
+1. **Install Hadoop/winutils on Windows (recommended if continuing on this machine):**
+   - Download a `winutils.exe` bundle that matches the Spark/Hadoop version.
+   - Extract to a folder such as `C:\hadoop\bin\winutils.exe`.
+   - Set environment variables:
+     - `HADOOP_HOME=C:\hadoop`
+     - Add `%HADOOP_HOME%\bin` to `PATH`.
+   - Restart the terminal/IDE and rerun `auth_to_parquet.py` and similar scripts.
+
+2. **Run Parquet writes on a Linux/macOS environment (e.g. WSL2, remote VM, cloud notebook):**
+   - Clone the repository to a non-Windows environment.
+   - Install Java, Spark, and Python dependencies.
+   - Run the `*_to_parquet.py` scripts there; Hadoop's local filesystem usually works without extra configuration.
+
+3. **Short-term workaround (for course milestones):**
+   - For M2, it is sufficient to demonstrate ingestion and acquisition; Parquet (Silver layer) can be documented as planned/partially implemented.
+   - For M3, if environment setup is still blocked, document this Windows-specific Hadoop limitation in the report and focus on DataFrame-level transformations (using the raw CSV/bz2 reads) while planning to move them to Parquet once the environment is ready.
+
+Summary
+-------
+- The Parquet write failure is an environment configuration issue specific to Hadoop/Spark on Windows (missing `HADOOP_HOME` and `winutils.exe`), not a logic error in the auth ingestion or processing code.
+- Ingestion of LANL auth/dns/flows/proc and URLHaus acquisition are confirmed working; enabling the Silver Parquet layer will require either configuring Hadoop on Windows or running the write jobs in a non-Windows environment.
+
