@@ -108,7 +108,7 @@ No pivot from M1 design; current work is local proof-of-concept (samples, persis
 - **Sample data:** Generated samples in `sample data/`: LANL-style CSVs (`auth_sample.txt`, `dns_sample.txt`, `flows_sample.txt`, `proc_sample.txt`) and URLHaus JSON (`urlhaus_sample.json`) from `scripts/fetch_urlhaus.py`. These are committed for pipeline testing and M2 evidence.
 
 ## Data Pipeline Workflow
-Ingestion (Bronze): Raw CSV logs from Los Alamos National Lab (LANL) are loaded into HDFS blocks.
+Ingestion (Bronze): Raw CSV logs from Los Alamos National Lab (LANL) are loaded into HDFS blocks (future), and for local development are ingested directly from `data/` using PySpark.
 Normalization (Silver): Spark DataFrames enforce schema validation and normalize heterogeneous formats.
 Enrichment (Gold): A Broadcast Hash Join correlates host activity with malicious URL feeds to identify Indicators of Compromise (IoCs).
 Indexing: Enriched events are stored in HBase, utilizing a custom row-key design to prevent region hotspotting and enable low-latency lookups.
@@ -129,7 +129,47 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
   ```
   Saves `sample data/urlhaus_sample.json` (default 20 URLs). Use `--limit 50` for more. Console output and the saved file are evidence of working acquisition.
 - **Create sample data (LANL-style local files):** From project root, run `python scripts/create_samples.py`. Use `--lines 1000` for a small sample suitable for git.
-- **Full pipeline (planned):** Data ingestion via `src/ingestion/load_lanl.py`, processing via `src/processing/enrich_logs.py`, analysis in `notebooks/` — to be wired in later milestones.
+- **Ingest LANL auth dataset (PySpark):** Ensure `data/lanl-auth-dataset-1.bz2` is present, then from project root:
+  ```bash
+  # PySpark via Python
+  python src/ingestion/ingest_auth_logs.py
+
+  # or, using spark-submit if Spark is installed system-wide
+  spark-submit src/ingestion/ingest_auth_logs.py
+  ```
+  This script reads the compressed auth file with a simple schema:
+  - `time` (string, event index)
+  - `user` (string, e.g. `U1`, `U2`, …)
+  - `computer` (string, e.g. `C1`, `C2`, …)
+
+  Example output:
+  ```text
+  root
+   |-- time: string (nullable = true)
+   |-- user: string (nullable = true)
+   |-- computer: string (nullable = true)
+
+  +----+----+--------+
+  |time|user|computer|
+  +----+----+--------+
+  |1   |U1  |C1      |
+  |1   |U1  |C2      |
+  |2   |U2  |C3      |
+  |3   |U3  |C4      |
+  |6   |U4  |C5      |
+  |7   |U4  |C5      |
+  |7   |U5  |C6      |
+  |8   |U6  |C7      |
+  |11  |U7  |C8      |
+  |12  |U8  |C9      |
+  +----+----+--------+
+  only showing top 10 rows
+
+  Total rows: 708304516
+  Partitions: 18
+  ```
+  This demonstrates that the full LANL auth dataset (~708M rows) can be ingested and distributed across Spark partitions for downstream processing.
+- **Full pipeline (planned):** Additional ingestion jobs (e.g. `load_lanl.py`), processing via `src/processing/enrich_logs.py`, and analysis in `notebooks/` — to be wired in later milestones.
 
 ## Current status
 
@@ -138,6 +178,7 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
 | Data acquisition (URLHaus API)  | Done (`scripts/fetch_urlhaus.py`, output `sample data/urlhaus_sample.json`) |
 | Sample data generation          | Done (`scripts/create_samples.py`, output in `sample data/`)           |
 | Persistent storage              | Done (sample data and raw data paths documented above)               |
+| LANL auth ingestion (PySpark)   | Done (`src/ingestion/ingest_auth_logs.py`, ~708M rows, 18 partitions) |
 | Pipeline orchestration          | Planned (M2)                                                           |
 | Processing / enrichment         | Planned (M3)                                                           |
 
