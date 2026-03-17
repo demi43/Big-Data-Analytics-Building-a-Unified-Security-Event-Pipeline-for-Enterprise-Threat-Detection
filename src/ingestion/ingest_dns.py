@@ -3,18 +3,18 @@ from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 import os
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-INPUT_PATH = os.path.join(PROJECT_ROOT, "data", "lanl-auth-dataset-1.bz2")
+INPUT_PATH = os.path.join(PROJECT_ROOT, "data", "dns.txt.gz")
 
 schema=StructType([
     StructField("time", IntegerType(), True),
-    StructField("user", StringType(), True),
-    StructField("computer", StringType(), True),
+    StructField("SourceComputer", StringType(), True),
+    StructField("ComputerResolved", StringType(), True),
 
 ])
 
 spark=(
     SparkSession.builder
-    .appName("Ingest Auth Logs")
+    .appName("ingest dns")
     .getOrCreate()
 )
 spark 
@@ -22,7 +22,7 @@ spark
 df_pyspark=(spark.read
 .option("header",False)
 .schema(schema)
-.option("compression","bzip2")
+.option("compression","gzip")
 .csv(INPUT_PATH)
 )
 
