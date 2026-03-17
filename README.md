@@ -169,6 +169,132 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
   Partitions: 18
   ```
   This demonstrates that the full LANL auth dataset (~708M rows) can be ingested and distributed across Spark partitions for downstream processing.
+- **Ingest LANL DNS dataset (PySpark):** Ensure `data/dns.txt.gz` is present, then from project root:
+  ```bash
+  # PySpark via Python
+  python src/ingestion/ingest_dns.py
+
+  # or, using spark-submit if Spark is installed system-wide
+  spark-submit src/ingestion/ingest_dns.py
+  ```
+  This script reads the compressed DNS file with a simple schema:
+  - `time` (integer, event time index)
+  - `SourceComputer` (string, source computer making the DNS query)
+  - `ComputerResolved` (string, de-identified computer/hostname resolved by DNS)
+
+  Example output:
+  ```text
+  root
+   |-- time: integer (nullable = true)
+   |-- SourceComputer: string (nullable = true)
+   |-- ComputerResolved: string (nullable = true)
+
+  +----+--------------+----------------+
+  |time|SourceComputer|ComputerResolved|
+  +----+--------------+----------------+
+  |2   |C4653         |C5030           |
+  |2   |C5782         |C16712          |
+  |6   |C1191         |C419            |
+  |15  |C3380         |C22841          |
+  |18  |C2436         |C5030           |
+  |31  |C161          |C2109           |
+  |35  |C5642         |C528            |
+  |38  |C3380         |C22841          |
+  |42  |C2428         |C1065           |
+  |42  |C2428         |C2109           |
+  +----+--------------+----------------+
+  only showing top 10 rows
+
+  Total rows: 40821591
+  Partitions: 1
+  ```
+  This demonstrates that the full LANL DNS dataset (~40.8M rows) can be ingested and distributed across Spark partitions for downstream processing.
+- **Ingest LANL flows dataset (PySpark):** Ensure `data/flows.txt.gz` is present, then from project root:
+  ```bash
+  # PySpark via Python
+  python src/ingestion/ingest_flows.py
+
+  # or, using spark-submit if Spark is installed system-wide
+  spark-submit src/ingestion/ingest_flows.py
+  ```
+  This script reads the compressed flows file with a schema:
+  - `time` (integer)
+  - `duration` (integer)
+  - `src_computer` (string)
+  - `src_port` (string)
+  - `dst_computer` (string)
+  - `dst_port` (string)
+  - `protocol` (string)
+  - `packets_count` (integer)
+  - `bytes_count` (integer)
+
+  Example output:
+  ```text
+  root
+   |-- time: integer (nullable = true)
+   |-- duration: integer (nullable = true)
+   |-- src_computer: string (nullable = true)
+   |-- src_port: string (nullable = true)
+   |-- dst_computer: string (nullable = true)
+   |-- dst_port: string (nullable = true)
+   |-- protocol: string (nullable = true)
+   |-- packets_count: integer (nullable = true)
+   |-- bytes_count: integer (nullable = true)
+
+  +----+--------+------------+--------+------------+--------+--------+-------------+-----------+
+  |time|duration|src_computer|src_port|dst_computer|dst_port|protocol|packets_count|bytes_count|
+  +----+--------+------------+--------+------------+--------+--------+-------------+-----------+
+  |1   |0       |C1065       |389     |C3799       |N10451  |6       |10           |5323       |
+  |1   |0       |C1423       |N1136   |C1707       |N1      |6       |5            |847        |
+  ...  |...     |...         |...     |...         |...     |...     |...          |...        |
+  +----+--------+------------+--------+------------+--------+--------+-------------+-----------+
+  only showing top 10 rows
+  ```
+  This demonstrates that the LANL flows dataset can be ingested and structured for downstream processing.
+- **Ingest LANL proc dataset (PySpark):** Ensure `data/proc.txt.gz` is present, then from project root:
+  ```bash
+  # PySpark via Python
+  python src/ingestion/ingest_proc.py
+
+  # or, using spark-submit if Spark is installed system-wide
+  spark-submit src/ingestion/ingest_proc.py
+  ```
+  This script reads the compressed proc file with a schema:
+  - `time` (integer)
+  - `user@domain` (string)
+  - `computer` (string)
+  - `processname` (string)
+  - `Start/End` (string)
+
+  Example output:
+  ```text
+  root
+   |-- time: integer (nullable = true)
+   |-- user@domain: string (nullable = true)
+   |-- computer: string (nullable = true)
+   |-- processname: string (nullable = true)
+   |-- Start/End: string (nullable = true)
+
+  +----+-----------+--------+-----------+---------+
+  |time|user@domain|computer|processname|Start/End|
+  +----+-----------+--------+-----------+---------+
+  |1   |C1$@DOM1   |C1      |P16        |Start    |
+  |1   |C1001$@DOM1|C1001   |P4         |Start    |
+  |1   |C1002$@DOM1|C1002   |P4         |Start    |
+  |1   |C1004$@DOM1|C1004   |P4         |Start    |
+  |1   |C1017$@DOM1|C1017   |P4         |Start    |
+  |1   |C1018$@DOM1|C1018   |P4         |Start    |
+  |1   |C1020$@DOM1|C1020   |P3         |Start    |
+  |1   |C1020$@DOM1|C1020   |P4         |Start    |
+  |1   |C1028$@DOM1|C1028   |P16        |End      |
+  |1   |C1029$@DOM1|C1029   |P4         |Start    |
+  +----+-----------+--------+-----------+---------+
+  only showing top 10 rows
+
+  Total rows: 426045096
+  Partitions: 1
+  ```
+  This demonstrates that the LANL proc dataset (~426M process events) can be ingested and structured for downstream processing.
 - **Full pipeline (planned):** Additional ingestion jobs (e.g. `load_lanl.py`), processing via `src/processing/enrich_logs.py`, and analysis in `notebooks/` — to be wired in later milestones.
 
 ## Current status
@@ -179,6 +305,9 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
 | Sample data generation          | Done (`scripts/create_samples.py`, output in `sample data/`)           |
 | Persistent storage              | Done (sample data and raw data paths documented above)               |
 | LANL auth ingestion (PySpark)   | Done (`src/ingestion/ingest_auth_logs.py`, ~708M rows, 18 partitions) |
+| LANL DNS ingestion (PySpark)    | Done (`src/ingestion/ingest_dns.py`, ~40.8M rows, 1 partition)        |
+| LANL flows ingestion (PySpark)  | Done (`src/ingestion/ingest_flows.py`, reads `data/flows.txt.gz`)     |
+| LANL proc ingestion (PySpark)   | Done (`src/ingestion/ingest_proc.py`, ~426M rows, 1 partition)        |
 | Pipeline orchestration          | Planned (M2)                                                           |
 | Processing / enrichment         | Planned (M3)                                                           |
 
