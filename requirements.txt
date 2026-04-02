@@ -9,4 +9,6 @@ pandas
 pyarrow
 requests
 python-dotenv
+parquet-tools
 
+duckdb

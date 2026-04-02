@@ -49,3 +49,5 @@ Summary
 - The Parquet write failure is an environment configuration issue specific to Hadoop/Spark on Windows (missing `HADOOP_HOME` and `winutils.exe`), not a logic error in the auth ingestion or processing code.
 - Ingestion of LANL auth/dns/flows/proc and URLHaus acquisition are confirmed working; enabling the Silver Parquet layer will require either configuring Hadoop on Windows or running the write jobs in a non-Windows environment.
 
+
+we installed java 17 for spark and python 3.12 | 

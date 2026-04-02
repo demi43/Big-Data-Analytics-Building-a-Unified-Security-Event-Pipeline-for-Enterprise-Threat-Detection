@@ -1,37 +1,50 @@
-from pyspark.sql import SparkSession 
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 import os
+import sys
+
+# Fix PySpark on Windows - must be set before importing SparkSession
+os.environ["PYSPARK_PYTHON"] = sys.executable
+os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
+
+from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 INPUT_PATH = os.path.join(PROJECT_ROOT, "data", "dns.txt.gz")
 
-schema=StructType([
+# Debug - verify paths
+print(f"PROJECT_ROOT: {PROJECT_ROOT}")
+print(f"INPUT_PATH:   {INPUT_PATH}")
+print(f"File exists:  {os.path.exists(INPUT_PATH)}")
+
+# Schema
+schema = StructType([
     StructField("time", IntegerType(), True),
     StructField("SourceComputer", StringType(), True),
     StructField("ComputerResolved", StringType(), True),
-
 ])
 
-spark=(
+# Spark session
+spark = (
     SparkSession.builder
-    .appName("ingest dns")
+    .appName("Ingest DNS Logs")
+    .master("local[*]")
     .getOrCreate()
 )
-spark 
 
-df_pyspark=(spark.read
-.option("header",False)
-.schema(schema)
-.option("compression","gzip")
-.csv(INPUT_PATH)
+# Read
+df_pyspark = (
+    spark.read
+        .option("header", False)
+        .option("compression", "gzip")
+        .schema(schema)
+        .csv(INPUT_PATH)
 )
 
 df_pyspark.printSchema()
+df_pyspark.show(10, truncate=False)
 
-df_pyspark.show(10,truncate=False)
+print(f"Type:       {type(df_pyspark)}")
+print(f"Row count:  {df_pyspark.count()}")
+print(f"Partitions: {df_pyspark.rdd.getNumPartitions()}")
 
-print(type(df_pyspark))
-
-print(df_pyspark.count())  # number of rows
-
-print(df_pyspark.rdd.getNumPartitions())
+spark.stop()

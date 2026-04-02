@@ -1,37 +1,50 @@
-from pyspark.sql import SparkSession 
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 import os
+import sys
+
+# Fix PySpark on Windows - must be set before importing SparkSession
+os.environ["PYSPARK_PYTHON"] = sys.executable
+os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
+
+from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 INPUT_PATH = os.path.join(PROJECT_ROOT, "data", "lanl-auth-dataset-1.bz2")
 
-schema=StructType([
-    StructField("time", IntegerType(), True),
-    StructField("user", StringType(), True),
-    StructField("computer", StringType(), True),
+# Debug - verify paths
+print(f"PROJECT_ROOT: {PROJECT_ROOT}")
+print(f"INPUT_PATH:   {INPUT_PATH}")
+print(f"File exists:  {os.path.exists(INPUT_PATH)}")
 
+# Schema
+schema = StructType([
+    StructField("time", IntegerType(), True),
+    StructField("source_user", StringType(), True),
+    StructField("source_computer", StringType(), True),
 ])
 
-spark=(
+# Spark session
+spark = (
     SparkSession.builder
     .appName("Ingest Auth Logs")
+    .master("local[*]")
     .getOrCreate()
 )
-spark 
 
-df_pyspark=(spark.read
-.option("header",False)
-.schema(schema)
-.option("compression","bzip2")
-.csv(INPUT_PATH)
+# Read
+df_pyspark = (
+    spark.read
+        .option("header", False)
+        .option("compression", "bzip2")
+        .schema(schema)
+        .csv(INPUT_PATH)
 )
 
 df_pyspark.printSchema()
+df_pyspark.show(10, truncate=False)
 
-df_pyspark.show(10,truncate=False)
+print(f"Type:       {type(df_pyspark)}")
+print(f"Row count:  {df_pyspark.count()}")
+print(f"Partitions: {df_pyspark.rdd.getNumPartitions()}")
 
-print(type(df_pyspark))
-
-print(df_pyspark.count())  # number of rows
-
-print(df_pyspark.rdd.getNumPartitions())
+spark.stop()
