@@ -10,13 +10,13 @@ This project implements a scalable distributed data pipeline designed to ingest,
 
 The architecture is designed to handle the **Volume, Variety, and Velocity** of security logs by leveraging a layered distributed system:
 
-| Layer          | Technology             | Core Big Data Concept                                    |
-| :------------- | :--------------------- | :------------------------------------------------------- |
-| **Storage**    | HDFS                   | Distributed Block Storage (128MB) & Replication Factor 3 |
-| **Processing** | Apache Spark on YARN   | Parallel DAG Execution, Map-Shuffle-Reduce Optimization  |
-| **Data Store** | Apache HBase           | Wide-column Model, LSM-Trees, & Column Families          |
-| **Syntax**     | Apache Parquet         | Columnar Storage with Snappy Compression                 |
-| **Querying**   | Spark SQL / DataFrames | Distributed Execution & Partition-aware Querying         |
+| Layer          | Technology                     | Core Big Data Concept                                              |
+| :------------- | :----------------------------- | :----------------------------------------------------------------- |
+| **Storage**    | Amazon S3                      | Durable object storage, prefixes per layer, lifecycle & encryption |
+| **Processing** | Apache Spark on AWS (e.g. EMR) | Parallel DAG execution; S3 as read/write data lake                 |
+| **Data Store** | Apache HBase                   | Wide-column Model, LSM-Trees, & Column Families                    |
+| **Syntax**     | Apache Parquet                 | Columnar Storage with Snappy Compression                           |
+| **Querying**   | Spark SQL / DataFrames         | Distributed Execution & Partition-aware Querying                   |
 
 LANL User-Computer Auth logs (CSV) [https://csr.lanl.gov/data/cyber1/],
 LANL Unified Host/Network logs (CSV) [https://csr.lanl.gov/data/auth/], and
@@ -31,7 +31,7 @@ URLHaus API threat feeds (JSON) [https://urlhaus.abuse.ch/api/].
   ─────────────                   ───────────────                    ────────────────
 
   LANL (auth, dns,                ┌─────────────────┐
-  flows, proc)  ─────────────────►│  Ingestion      │   Planned: HDFS, load_lanl.py
+  flows, proc)  ─────────────────►│  Ingestion      │   Planned: S3 (bronze), load_lanl.py
   (file / API)                    │  (Bronze)       │  Current:  Local data/ + create_samples.py
                                   └────────┬────────┘
                                            │
@@ -56,15 +56,15 @@ URLHaus API threat feeds (JSON) [https://urlhaus.abuse.ch/api/].
 
 **Stack layers — implementation status:**
 
-| Layer      | Technology (target)       | M2 status | Notes                                                           |
-| ---------- | ------------------------- | --------- | --------------------------------------------------------------- |
-| Storage    | HDFS (128MB blocks, RF 3) | Planned   | Raw data currently in local `data/`; samples in `sample data/`. |
-| Syntax     | Parquet + Snappy          | Planned   | To be used after normalization (M3).                            |
-| Processing | Apache Spark on YARN      | Planned   | PySpark in `requirements.txt`; jobs to be added.                |
-| Data store | Apache HBase              | Planned   | Schema in `src/stores/`; writes in later milestone.             |
-| Querying   | Spark SQL / DataFrames    | Planned   | Partition pruning, distributed execution.                       |
+| Layer      | Technology (target)         | M2 status | Notes                                                                                                          |
+| ---------- | --------------------------- | --------- | -------------------------------------------------------------------------------------------------------------- |
+| Storage    | Amazon S3 (bucket prefixes) | Planned   | Raw data currently in local `data/`; samples in `sample data/`. Production: `s3://…/bronze`, `silver`, `gold`. |
+| Syntax     | Parquet + Snappy            | Planned   | To be used after normalization (M3).                                                                           |
+| Processing | Apache Spark (e.g. EMR)     | Planned   | PySpark in `requirements.txt`; jobs read/write S3 paths.                                                       |
+| Data store | Apache HBase                | Planned   | Schema in `src/stores/`; writes in later milestone.                                                            |
+| Querying   | Spark SQL / DataFrames      | Planned   | Partition pruning, distributed execution.                                                                      |
 
-No pivot from M1 design; current work is local proof-of-concept (samples, persistence, structure) before scaling to the full stack.
+Medallion layout (bronze / silver / gold) is unchanged; **bronze and silver/gold Parquet layers target S3** instead of HDFS. Current work remains a local proof-of-concept before wiring `s3://` paths and a managed Spark runtime (e.g. EMR).
 
 ## Setup
 
@@ -90,7 +90,7 @@ No pivot from M1 design; current work is local proof-of-concept (samples, persis
 │   ├── fetch_urlhaus.py    # Fetch recent URLs from URLHaus API → sample data/urlhaus_sample.json
 │   └── create_samples.py   # Build samples from data/ → sample data/
 ├── src/                    # Core pipeline source code (planned)
-│   ├── ingestion/          # PySpark jobs for moving raw logs into HDFS
+│   ├── ingestion/          # PySpark jobs for landing raw logs in S3 (bronze)
 │   ├── processing/         # Normalization, broadcast joins, enrichment
 │   └── stores/             # HBase schema and write operations
 ├── docs/                   # Architecture diagrams and milestone PDF reports
@@ -106,15 +106,18 @@ No pivot from M1 design; current work is local proof-of-concept (samples, persis
 
 - **Raw / compressed data:** Place LANL-style files (e.g. `dns.txt.gz`, `flows.txt.gz`, `proc.txt.gz`, `lanl-auth-dataset-1.bz2`) in `data/`. These are not committed (see `.gitignore`).
 - **Sample data:** Generated samples in `sample data/`: LANL-style CSVs (`auth_sample.txt`, `dns_sample.txt`, `flows_sample.txt`, `proc_sample.txt`) and URLHaus JSON (`urlhaus_sample.json`) from `scripts/fetch_urlhaus.py`. These are committed for pipeline testing and M2 evidence.
+- **Production (S3):** Use one or more buckets with clear prefixes, e.g. `s3://your-bucket/bronze/lanl/`, `s3://your-bucket/silver/parquet/`, `s3://your-bucket/gold/`. Spark jobs use these URIs as input/output; on EMR, prefer instance profiles for credentials. For local Spark against S3, configure the Hadoop `s3a` filesystem and AWS credentials per [AWS documentation](https://docs.aws.amazon.com/emr/latest/ManagementGuide/emr-plan-file-systems.html).
 
 ## Data Pipeline Workflow
-Ingestion (Bronze): Raw CSV logs from Los Alamos National Lab (LANL) are loaded into HDFS blocks (future), and for local development are ingested directly from `data/` using PySpark.
+
+Ingestion (Bronze): Raw LANL logs are landed in **S3** under a bronze prefix (future full run); for local development they are ingested directly from `data/` using PySpark.
 Normalization (Silver): Spark DataFrames enforce schema validation and normalize heterogeneous formats.
 Enrichment (Gold): A Broadcast Hash Join correlates host activity with malicious URL feeds to identify Indicators of Compromise (IoCs).
 Indexing: Enriched events are stored in HBase, utilizing a custom row-key design to prevent region hotspotting and enable low-latency lookups.
 
 Creating data samples (local)
 To build small CSV samples from the compressed data in `data/` (for local runs and notebooks), use:
+
 ```bash
 python scripts/create_samples.py
 ```
@@ -130,6 +133,7 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
   Saves `sample data/urlhaus_sample.json` (default 20 URLs). Use `--limit 50` for more. Console output and the saved file are evidence of working acquisition.
 - **Create sample data (LANL-style local files):** From project root, run `python scripts/create_samples.py`. Use `--lines 1000` for a small sample suitable for git.
 - **Ingest LANL auth dataset (PySpark):** Ensure `data/lanl-auth-dataset-1.bz2` is present, then from project root:
+
   ```bash
   # PySpark via Python
   python src/ingestion/ingest_auth_logs.py
@@ -137,12 +141,14 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
   # or, using spark-submit if Spark is installed system-wide
   spark-submit src/ingestion/ingest_auth_logs.py
   ```
+
   This script reads the compressed auth file with a simple schema:
   - `time` (string, event index)
   - `user` (string, e.g. `U1`, `U2`, …)
   - `computer` (string, e.g. `C1`, `C2`, …)
 
   Example output:
+
   ```text
   root
    |-- time: string (nullable = true)
@@ -168,8 +174,11 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
   Total rows: 708304516
   Partitions: 18
   ```
+
   This demonstrates that the full LANL auth dataset (~708M rows) can be ingested and distributed across Spark partitions for downstream processing.
+
 - **Ingest LANL DNS dataset (PySpark):** Ensure `data/dns.txt.gz` is present, then from project root:
+
   ```bash
   # PySpark via Python
   python src/ingestion/ingest_dns.py
@@ -177,12 +186,14 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
   # or, using spark-submit if Spark is installed system-wide
   spark-submit src/ingestion/ingest_dns.py
   ```
+
   This script reads the compressed DNS file with a simple schema:
   - `time` (integer, event time index)
   - `SourceComputer` (string, source computer making the DNS query)
   - `ComputerResolved` (string, de-identified computer/hostname resolved by DNS)
 
   Example output:
+
   ```text
   root
    |-- time: integer (nullable = true)
@@ -208,8 +219,11 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
   Total rows: 40821591
   Partitions: 1
   ```
+
   This demonstrates that the full LANL DNS dataset (~40.8M rows) can be ingested and distributed across Spark partitions for downstream processing.
+
 - **Ingest LANL flows dataset (PySpark):** Ensure `data/flows.txt.gz` is present, then from project root:
+
   ```bash
   # PySpark via Python
   python src/ingestion/ingest_flows.py
@@ -217,6 +231,7 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
   # or, using spark-submit if Spark is installed system-wide
   spark-submit src/ingestion/ingest_flows.py
   ```
+
   This script reads the compressed flows file with a schema:
   - `time` (integer)
   - `duration` (integer)
@@ -229,6 +244,7 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
   - `bytes_count` (integer)
 
   Example output:
+
   ```text
   root
    |-- time: integer (nullable = true)
@@ -250,8 +266,11 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
   +----+--------+------------+--------+------------+--------+--------+-------------+-----------+
   only showing top 10 rows
   ```
+
   This demonstrates that the LANL flows dataset can be ingested and structured for downstream processing.
+
 - **Ingest LANL proc dataset (PySpark):** Ensure `data/proc.txt.gz` is present, then from project root:
+
   ```bash
   # PySpark via Python
   python src/ingestion/ingest_proc.py
@@ -259,6 +278,7 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
   # or, using spark-submit if Spark is installed system-wide
   spark-submit src/ingestion/ingest_proc.py
   ```
+
   This script reads the compressed proc file with a schema:
   - `time` (integer)
   - `user@domain` (string)
@@ -267,6 +287,7 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
   - `Start/End` (string)
 
   Example output:
+
   ```text
   root
    |-- time: integer (nullable = true)
@@ -294,22 +315,24 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
   Total rows: 426045096
   Partitions: 1
   ```
+
   This demonstrates that the LANL proc dataset (~426M process events) can be ingested and structured for downstream processing.
+
 - **Full pipeline (planned):** Additional ingestion jobs (e.g. `load_lanl.py`), processing via `src/processing/enrich_logs.py`, and analysis in `notebooks/` — to be wired in later milestones.
 
 ## Current status
 
-| Component                       | Status                                                                 |
-| ------------------------------- | ---------------------------------------------------------------------- |
-| Data acquisition (URLHaus API)  | Done (`scripts/fetch_urlhaus.py`, output `sample data/urlhaus_sample.json`) |
-| Sample data generation          | Done (`scripts/create_samples.py`, output in `sample data/`)           |
-| Persistent storage              | Done (sample data and raw data paths documented above)               |
-| LANL auth ingestion (PySpark)   | Done (`src/ingestion/ingest_auth_logs.py`, ~708M rows, 18 partitions) |
-| LANL DNS ingestion (PySpark)    | Done (`src/ingestion/ingest_dns.py`, ~40.8M rows, 1 partition)        |
-| LANL flows ingestion (PySpark)  | Done (`src/ingestion/ingest_flows.py`, reads `data/flows.txt.gz`)     |
-| LANL proc ingestion (PySpark)   | Done (`src/ingestion/ingest_proc.py`, ~426M rows, 1 partition)        |
-| Pipeline orchestration          | Planned (M2)                                                           |
-| Processing / enrichment         | Planned (M3)                                                           |
+| Component                      | Status                                                                      |
+| ------------------------------ | --------------------------------------------------------------------------- |
+| Data acquisition (URLHaus API) | Done (`scripts/fetch_urlhaus.py`, output `sample data/urlhaus_sample.json`) |
+| Sample data generation         | Done (`scripts/create_samples.py`, output in `sample data/`)                |
+| Persistent storage             | Done (sample data and raw data paths documented above)                      |
+| LANL auth ingestion (PySpark)  | Done (`src/ingestion/ingest_auth_logs.py`, ~708M rows, 18 partitions)       |
+| LANL DNS ingestion (PySpark)   | Done (`src/ingestion/ingest_dns.py`, ~40.8M rows, 1 partition)              |
+| LANL flows ingestion (PySpark) | Done (`src/ingestion/ingest_flows.py`, reads `data/flows.txt.gz`)           |
+| LANL proc ingestion (PySpark)  | Done (`src/ingestion/ingest_proc.py`, ~426M rows, 1 partition)              |
+| Pipeline orchestration         | Planned (M2)                                                                |
+| Processing / enrichment        | Planned (M3)                                                                |
 
 ## Getting Started (full pipeline, future)
 
