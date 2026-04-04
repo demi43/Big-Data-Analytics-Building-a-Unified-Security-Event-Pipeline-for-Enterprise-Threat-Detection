@@ -12,3 +12,7 @@ python-dotenv
 parquet-tools
 
 duckdb
+
+
+# storage 
+awscli
