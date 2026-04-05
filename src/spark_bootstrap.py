@@ -81,17 +81,39 @@ def build_spark_session(
         b = b.config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
         b = b.config("spark.hadoop.fs.s3.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
         b = b.config("spark.hadoop.fs.s3a.endpoint", "s3.amazonaws.com")
+        # Explicitly override Spark 4 defaults that use "s" suffixes
         b = b.config("spark.hadoop.fs.s3a.connection.timeout", "60000")
-        b = b.config("spark.hadoop.fs.s3a.socket.timeout", "60000")
-        # Spark 4 can merge Hadoop 3.4 defaults like fs.s3a.threads.keepalivetime=60s; older hadoop-aws used getLong() → NFE.
+        b = b.config("spark.hadoop.fs.s3a.connection.establish.timeout", "60000")
         b = b.config("spark.hadoop.fs.s3a.threads.keepalivetime", "60")
+        b = b.config("spark.hadoop.fs.s3a.connection.idle.time", "60000")
+        b = b.config("spark.hadoop.fs.s3a.socket.timeout", "60000")
+
+        # Fix for Hadoop 3.3.x multipart upload parsing issues
+        # Set numeric values instead of duration strings
+        b = b.config("spark.hadoop.fs.s3a.multipart.purge.age", "86400000")  # 24 hours in ms
+        b = b.config("spark.hadoop.fs.s3a.multipart.size", "104857600")  # 100MB
+        b = b.config("spark.hadoop.fs.s3a.multipart.threshold", "104857600")  # 100MB
 
         access_key = os.environ.get("AWS_ACCESS_KEY_ID", "").strip()
         secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip()
+        session_token = os.environ.get("AWS_SESSION_TOKEN", "").strip()
 
+        # Spark/Hadoop 3.4 defaults may list AWS SDK v2 providers (software.amazon.awssdk.*).
+        # hadoop-aws + aws-java-sdk-bundle only ship SDK v1 (com.amazonaws.*) — force v1 providers.
         if access_key and secret_key:
             b = b.config("spark.hadoop.fs.s3a.access.key", access_key)
             b = b.config("spark.hadoop.fs.s3a.secret.key", secret_key)
+            if session_token:
+                b = b.config("spark.hadoop.fs.s3a.session.token", session_token)
+                b = b.config(
+                    "spark.hadoop.fs.s3a.aws.credentials.provider",
+                    "org.apache.hadoop.fs.s3a.TemporaryAWSCredentialsProvider",
+                )
+            else:
+                b = b.config(
+                    "spark.hadoop.fs.s3a.aws.credentials.provider",
+                    "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider",
+                )
         else:
             b = b.config(
                 "spark.hadoop.fs.s3a.aws.credentials.provider",
@@ -102,9 +124,22 @@ def build_spark_session(
     driver_mem = os.environ.get("SPARK_DRIVER_MEMORY", "").strip()
     if driver_mem:
         b = b.config("spark.driver.memory", driver_mem)
+    else:
+        # Default to conservative memory for local development
+        b = b.config("spark.driver.memory", "2g")
+    
     max_result = os.environ.get("SPARK_DRIVER_MAX_RESULT_SIZE", "").strip()
     if max_result:
         b = b.config("spark.driver.maxResultSize", max_result)
+    else:
+        # Limit result size for local development
+        b = b.config("spark.driver.maxResultSize", "1g")
+
+    # Conservative executor settings for local mode
+    if master.startswith("local"):
+        b = b.config("spark.executor.memory", "2g")
+        b = b.config("spark.executor.cores", "2")
+        b = b.config("spark.sql.shuffle.partitions", "4")  # Reduce from default
 
     if extra_config:
         for k, v in extra_config.items():

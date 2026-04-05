@@ -36,7 +36,11 @@ schema = StructType([
 spark = build_spark_session(
     "Proc to Parquet",
     cloud_paths=[INPUT_PATH, OUTPUT_PATH],
-    extra_config={"spark.sql.parquet.compression.codec": "snappy"},
+    extra_config={
+        "spark.sql.parquet.compression.codec": "snappy",
+        "spark.sql.parquet.enableVectorizedReader": "false",
+        "spark.hadoop.fs.s3a.experimental.input.fadvise": "sequential"
+    },
 )
 
 df = (
@@ -62,9 +66,9 @@ print(f"Partitions: {df.rdd.getNumPartitions()}")
 
 print(f"Written to: {OUTPUT_PATH}")
 
-df_verify = spark.read.parquet(OUTPUT_PATH)
-df_verify.printSchema()
-df_verify.show(5, truncate=False)
-print(f"Verified row count: {df_verify.count()}")
+# df_verify = spark.read.parquet(OUTPUT_PATH)
+# df_verify.printSchema()
+# df_verify.show(5, truncate=False)
+# print(f"Verified row count: {df_verify.count()}")
 
 spark.stop()

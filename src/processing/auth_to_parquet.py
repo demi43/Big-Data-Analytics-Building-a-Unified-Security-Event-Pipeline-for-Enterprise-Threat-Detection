@@ -32,9 +32,14 @@ schema = StructType([
 ])
 
 extra = {
-    "spark.sql.shuffle.partitions": os.environ.get("SPARK_SQL_SHUFFLE_PARTITIONS", "2"),
-    "spark.sql.adaptive.enabled": os.environ.get("SPARK_SQL_ADAPTIVE_ENABLED", "false"),
+    "spark.sql.shuffle.partitions": "1",
+    "spark.sql.adaptive.enabled": "false",
     "spark.sql.parquet.compression.codec": "snappy",
+    "spark.sql.parquet.enableVectorizedReader": "false",
+    "spark.hadoop.fs.s3a.experimental.input.fadvise": "sequential",
+    "spark.sql.execution.arrow.pyspark.enabled": "false",
+    "spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version": "2",  # ADD
+    "spark.sql.parquet.mergeSchema": "false",                              # ADD
 }
 
 spark = build_spark_session(
@@ -55,11 +60,12 @@ print(f"Row count:  {df_auth.count()}")
 df_auth.printSchema()
 df_auth.show(5, truncate=False)
 
-partitions = int(os.environ.get("AUTH_PARQUET_REPARTITION", "2"))
+partitions = int(os.environ.get("AUTH_PARQUET_REPARTITION", "0"))
 writer = df_auth.repartition(partitions) if partitions > 0 else df_auth
 (
     writer.write
         .mode("overwrite")
+        .option("mapreduce.fileoutputcommitter.algorithm.version", "2")
         .parquet(OUTPUT_PATH)
 )
 
