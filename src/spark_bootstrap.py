@@ -14,14 +14,35 @@ def fix_windows_pyspark() -> None:
     os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
 
+def _normalized_hadoop_home(raw: str) -> Path | None:
+    """HADOOP_HOME must be the distro root (folder that contains bin/), not .../bin."""
+    p = Path(raw.strip()).expanduser()
+    try:
+        p = p.resolve()
+    except OSError:
+        p = Path(raw.strip()).expanduser()
+    if p.name.lower() == "bin" and p.is_dir():
+        p = p.parent
+    if not p.is_dir():
+        return None
+    return p
+
+
 def apply_optional_hadoop_home() -> None:
-    hh = os.environ.get("HADOOP_HOME", "").strip()
-    if not hh:
+    raw = os.environ.get("HADOOP_HOME", "").strip()
+    if not raw:
         return
-    bin_dir = Path(hh) / "bin"
+    hh = _normalized_hadoop_home(raw)
+    if hh is None:
+        del os.environ["HADOOP_HOME"]
+        return
+    bin_dir = hh / "bin"
+    if not bin_dir.is_dir():
+        del os.environ["HADOOP_HOME"]
+        return
+    os.environ["HADOOP_HOME"] = str(hh)
     path = os.environ.get("PATH", "")
-    if bin_dir.is_dir():
-        os.environ["PATH"] = path + os.pathsep + str(bin_dir)
+    os.environ["PATH"] = path + os.pathsep + str(bin_dir)
 
 
 def default_spark_local_dir() -> str:
@@ -54,12 +75,23 @@ def build_spark_session(
         pkg = os.environ.get("SPARK_JARS_PACKAGES", "").strip()
         if pkg:
             b = b.config("spark.jars.packages", pkg)
-        b = b.config(
-            "spark.hadoop.fs.s3a.aws.credentials.provider",
-            "com.amazonaws.auth.DefaultAWSCredentialsProviderChain",
-        )
-        b = b.config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
 
+        b = b.config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+        b = b.config("spark.hadoop.fs.s3a.endpoint", "s3.amazonaws.com")
+        b = b.config("spark.hadoop.fs.s3a.connection.timeout", "60000")
+        b = b.config("spark.hadoop.fs.s3a.socket.timeout", "60000")
+
+        access_key = os.environ.get("AWS_ACCESS_KEY_ID", "").strip()
+        secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip()
+
+        if access_key and secret_key:
+            b = b.config("spark.hadoop.fs.s3a.access.key", access_key)
+            b = b.config("spark.hadoop.fs.s3a.secret.key", secret_key)
+        else:
+            b = b.config(
+                "spark.hadoop.fs.s3a.aws.credentials.provider",
+                "com.amazonaws.auth.DefaultAWSCredentialsProviderChain",
+            )
     b = b.config("spark.local.dir", default_spark_local_dir())
 
     driver_mem = os.environ.get("SPARK_DRIVER_MEMORY", "").strip()
@@ -73,4 +105,4 @@ def build_spark_session(
         for k, v in extra_config.items():
             b = b.config(k, v)
 
-    return b.getOrCreate()  # type: ignore[no-any-return]
+    return b.getOrCreate()
