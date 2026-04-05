@@ -24,45 +24,45 @@ URLHaus API threat feeds (JSON) [https://urlhaus.abuse.ch/api/].
 
 ## Architecture
 
-**Pipeline flow (current vs. planned):**
+**Pipeline flow (current implementation):**
 
 ```text
   Data Sources                    Pipeline Stages                    Storage / Output
   ─────────────                   ───────────────                    ────────────────
 
   LANL (auth, dns,                ┌─────────────────┐
-  flows, proc)  ─────────────────►│  Ingestion      │   Planned: S3 (bronze), load_lanl.py
-  (file / API)                    │  (Bronze)       │  Current:  Local data/ + create_samples.py
+  flows, proc)  ─────────────────►│  Ingestion      │   Local: data/ + create_samples.py
+  (file / API)                    │  (Bronze)       │   S3: s3a://bucket/bronze (planned)
                                   └────────┬────────┘
                                            │
   URLHaus (threat intel)  ────────►        ▼
   (JSON API)                      ┌─────────────────┐
-                                  │  Normalization  │   Planned (M3): Spark DataFrames, Parquet
-                                  │  (Silver)       │
+                                  │  Normalization  │   Spark DataFrames → Parquet
+                                  │  (Silver)       │   Local: Parquet/ subdirs
                                   └────────┬────────┘
                                            │
                                            ▼
                                   ┌─────────────────┐     ┌─────────────────┐
-                                  │  Enrichment      │────►│  Storage         │   Current: sample data/ (CSV)
-                                  │  (Gold)          │     │  (indexed)       │   Planned: HBase, Parquet
+                                  │  Enrichment      │────►│  Storage         │   Local: enriched data
+                                  │  (Gold)          │     │  (CSV/Parquet)   │   HBase: planned
                                   └─────────────────┘     └────────┬────────┘
                                                                    │
                                                                    ▼
                                   ┌─────────────────┐     ┌─────────────────┐
-                                  │  Querying       │◄────│  Spark SQL /     │   Planned: notebooks, threat hunting
+                                  │  Querying       │◄────│  Spark SQL /     │   Notebooks: threat hunting
                                   │  (Analytics)    │     │  DataFrames      │
                                   └─────────────────┘     └─────────────────┘
 ```
 
 **Stack layers — implementation status:**
 
-| Layer      | Technology (target)         | M2 status | Notes                                                                                                          |
-| ---------- | --------------------------- | --------- | -------------------------------------------------------------------------------------------------------------- |
-| Storage    | Amazon S3 (bucket prefixes) | Planned   | Raw data currently in local `data/`; samples in `sample data/`. Production: `s3a://…/bronze`, `silver`, `gold` (S3A in PySpark). |
-| Syntax     | Parquet + Snappy            | Planned   | To be used after normalization (M3).                                                                           |
-| Processing | Apache Spark (e.g. EMR)     | Planned   | PySpark in `requirements.txt`; jobs read/write S3 paths.                                                       |
-| Data store | Apache HBase                | Planned   | Schema in `src/stores/`; writes in later milestone.                                                            |
-| Querying   | Spark SQL / DataFrames      | Planned   | Partition pruning, distributed execution.                                                                      |
+| Layer      | Technology (target)         | Status  | Notes                                                                                |
+| ---------- | --------------------------- | ------- | ------------------------------------------------------------------------------------ |
+| Storage    | Amazon S3 (bucket prefixes) | Done    | Configured for bronze, silver, and gold layers; Parquet files uploaded to S3 bucket. |
+| Syntax     | Parquet + Snappy            | Done    | Implemented for silver layer normalization; outputs to `Parquet/` subdirs.           |
+| Processing | Apache Spark (e.g. EMR)     | Done    | PySpark in `requirements.txt`; jobs read/write local and S3 paths.                   |
+| Data store | Apache HBase                | Planned | Schema in `src/stores/`; writes in later milestone.                                  |
+| Querying   | Spark SQL / DataFrames      | Done    | Partition pruning, distributed execution; notebooks for analytics.                   |
 
 Medallion layout (bronze / silver / gold) is unchanged; **bronze and silver/gold Parquet layers target S3** instead of HDFS. Paths use **`s3a://`** for Spark (or `s3://` in `.env`, rewritten to `s3a://` in `pipeline_paths`).
 
@@ -95,15 +95,34 @@ Medallion layout (bronze / silver / gold) is unchanged; **bronze and silver/gold
 │   ├── pipeline_paths.py   # Resolve bronze/silver paths; normalizes s3:// → s3a:// for Spark
 │   ├── spark_bootstrap.py  # SparkSession builder (Windows PySpark fix, optional S3A JARs)
 │   ├── ingestion/          # PySpark read/bronze validation (local or S3 inputs)
-│   ├── processing/         # LANL → Parquet silver (`auth_to_parquet.py`, `dns_to_parquet.py`, …)
+│   │   ├── ingest_auth_logs.py
+│   │   ├── ingest_dns.py
+│   │   ├── ingest_flows.py
+│   │   └── ingest_proc.py
+│   ├── processing/         # LANL → Parquet silver
+│   │   ├── auth_to_parquet.py
+│   │   ├── dns_to_parquet.py
+│   │   ├── flows_to_parquet.py
+│   │   └── proc_to_parquet.py
+│   ├── scripts/            # Enrichment and other scripts
+│   │   └── enrich.py       # Gold layer enrichment with threat intelligence
 │   └── stores/             # HBase schema and write operations (planned)
 ├── docs/                   # Architecture diagrams and milestone PDF reports
-├── notebooks/              # Jupyter notebooks for threat hunting (planned)
+├── notebooks/              # Jupyter notebooks for threat hunting
+│   └── threat_hunting.ipynb
+├── Parquet/                # Silver layer Parquet outputs
+│   ├── auth/
+│   ├── dns/
+│   ├── flows/
+│   └── proc/
 ├── .env.example            # Template for environment variables (copy to .env)
 ├── .gitignore              # Excludes large data, .env, venv, Spark temp files
 ├── .gitattributes         # Line-ending normalization
 ├── requirements.txt        # Python dependencies (pyspark, pandas, requests, etc.)
-└── README.md               # This file
+├── README.md               # This file
+├── documentation.tex       # LaTeX documentation compiled from README and notes
+├── notes.txt               # Technical notes and troubleshooting
+└── executepipeline.py      # Pipeline execution script
 ```
 
 ## Storage
@@ -343,6 +362,14 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
 
 - **URLHaus rows → S3 Parquet (boto3 example):** Set `S3_URLHAUS_BUCKET` (and optionally `S3_URLHAUS_KEY`, `AWS_REGION`) in `.env`, ensure AWS credentials are available, then run `python scripts/urlhaus_to_parquet.py`.
 
+- **Enrichment (Gold layer):** Correlate LANL data with URLHaus threat intelligence. Ensure Parquet silver layers exist, then from project root:
+
+  ```bash
+  python src/scripts/enrich.py
+  ```
+
+  This script performs a broadcast hash join to enrich events with threat indicators, outputting enriched data for analysis.
+
 - **Full pipeline (planned):** Additional ingestion jobs (e.g. `load_lanl.py`), processing via `src/processing/enrich_logs.py`, and analysis in `notebooks/` — to be wired in later milestones.
 
 ## Current status
@@ -356,15 +383,44 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
 | LANL DNS ingestion (PySpark)   | Done (`src/ingestion/ingest_dns.py`, ~40.8M rows, 1 partition)              |
 | LANL flows ingestion (PySpark) | Done (`src/ingestion/ingest_flows.py`, reads `data/flows.txt.gz`)           |
 | LANL proc ingestion (PySpark)  | Done (`src/ingestion/ingest_proc.py`, ~426M rows, 1 partition)              |
-| LANL → Parquet (silver)        | Done (`src/processing/*_to_parquet.py`; paths configurable via `.env`)       |
-| Pipeline orchestration         | Planned (M2)                                                                |
-| Processing / enrichment        | Planned (M3)                                                                |
+| LANL → Parquet (silver)        | Done (`src/processing/*_to_parquet.py`; paths configurable via `.env`)      |
+| Enrichment (gold)              | Done (`src/scripts/enrich.py`; correlates with URLHaus)                     |
+| Pipeline orchestration         | Done (M2)                                                                   |
+| Processing / enrichment        | Done (M3)                                                                   |
+| Analytics / querying           | Done (notebooks for threat hunting)                                         |
 
-## Getting Started (full pipeline, future)
+## Pipeline Execution Sequence
 
-Data Ingestion: Execute src/ingestion/load_lanl.py to stage raw telemetry.
-Pipeline Execution: Run src/processing/enrich_logs.py to trigger the distributed enrichment job.
-Analysis: Utilize the notebooks in /notebooks to perform SQL-based threat hunting on the enriched HBase tables.
+The pipeline follows a medallion architecture: Bronze (raw ingestion), Silver (normalized Parquet), Gold (enriched analytics-ready data). Here's the logical sequence to run the full pipeline:
+
+1. **Data Preparation**
+   - Ensure raw LANL files are in `data/` (e.g., `lanl-auth-dataset-1.bz2`, `dns.txt.gz`, etc.)
+   - Fetch threat intelligence: `python scripts/fetch_urlhaus.py`
+   - (Optional) Generate samples: `python scripts/create_samples.py`
+
+2. **Bronze Layer: Ingestion**
+   - Load LANL auth data: `python src/ingestion/ingest_auth_logs.py`
+   - Load LANL DNS data: `python src/ingestion/ingest_dns.py`
+   - Load LANL flows data: `python src/ingestion/ingest_flows.py`
+   - Load LANL proc data: `python src/ingestion/ingest_proc.py`
+
+3. **Silver Layer: Normalization**
+   - Convert auth to Parquet: `python src/processing/auth_to_parquet.py`
+   - Convert DNS to Parquet: `python src/processing/dns_to_parquet.py`
+   - Convert flows to Parquet: `python src/processing/flows_to_parquet.py`
+   - Convert proc to Parquet: `python src/processing/proc_to_parquet.py`
+
+4. **Gold Layer: Enrichment**
+   - Correlate with threats: `python src/scripts/enrich.py`
+
+5. **Analytics: Querying**
+   - Open `notebooks/threat_hunting.ipynb` for analysis and threat detection queries.
+
+**Notes:**
+
+- Each step depends on the previous; ensure DataFrames are created before Parquet writes, and Parquet exists before enrichment.
+- For large datasets, run on a cluster (e.g., EMR) with S3 paths configured in `.env`.
+- Monitor logs for errors; refer to `notes.txt` for troubleshooting.
 
 Metrics for Success
 Throughput: Total events processed per second.
