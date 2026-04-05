@@ -1,22 +1,25 @@
 import os
 import sys
+from pathlib import Path
 
-# Fix PySpark on Windows - must be set before importing SparkSession
-os.environ["PYSPARK_PYTHON"] = sys.executable
-os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
+_SRC = Path(__file__).resolve().parent.parent
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
-from pyspark.sql import SparkSession
+from pipeline_paths import project_root, resolve_input
+from spark_bootstrap import build_spark_session, is_cloud_storage
+
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-INPUT_PATH = os.path.join(PROJECT_ROOT, "data", "flows.txt.gz")
+INPUT_PATH = resolve_input("FLOWS_INPUT_URI", "flows.txt.gz")
 
-# Debug - verify paths
-print(f"PROJECT_ROOT: {PROJECT_ROOT}")
+print(f"PROJECT_ROOT: {project_root()}")
 print(f"INPUT_PATH:   {INPUT_PATH}")
-print(f"File exists:  {os.path.exists(INPUT_PATH)}")
+print(
+    "File exists:  "
+    + ("n/a (cloud URI)" if is_cloud_storage(INPUT_PATH) else str(os.path.exists(INPUT_PATH)))
+)
 
-# Schema
 schema = StructType([
     StructField("time", IntegerType(), True),
     StructField("duration", IntegerType(), True),
@@ -29,15 +32,8 @@ schema = StructType([
     StructField("bytes_count", IntegerType(), True),
 ])
 
-# Spark session
-spark = (
-    SparkSession.builder
-    .appName("Ingest Flows Logs")
-    .master("local[*]")
-    .getOrCreate()
-)
+spark = build_spark_session("Ingest Flows Logs", cloud_paths=[INPUT_PATH])
 
-# Read
 df_pyspark = (
     spark.read
         .option("header", False)

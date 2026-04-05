@@ -79,6 +79,7 @@ Medallion layout (bronze / silver / gold) is unchanged; **bronze and silver/gold
 
 - Copy `.env.example` to `.env` and set `URLHAUS_API_KEY` for the URLHaus fetch script (free key at [auth.abuse.ch](https://auth.abuse.ch/)). Sample generation from local files does not require any keys.
 - Do **not** commit `.env` or real credentials; `.env` is listed in `.gitignore`.
+- **Pipeline paths:** Ingestion and `*_to_parquet.py` scripts load `.env` via `src/pipeline_paths.py`. Optional variables include per-dataset bronze URIs (`AUTH_INPUT_URI`, `DNS_INPUT_URI`, `FLOWS_INPUT_URI`, `PROC_INPUT_URI`), silver output (`SILVER_PARQUET_URI` or `PARQUET_OUTPUT_ROOT`), Spark tuning (`SPARK_MASTER`, `SPARK_DRIVER_MEMORY`, …), and URLHaus S3 upload (`S3_URLHAUS_BUCKET`, `S3_URLHAUS_KEY`, `AWS_REGION`). When unset, inputs default to `DATA_DIR` (default `data/`) and Parquet output to `Parquet/<dataset>/` under the project root.
 
 ## Project Structure
 
@@ -88,11 +89,14 @@ Medallion layout (bronze / silver / gold) is unchanged; **bronze and silver/gold
 ├── sample data/            # Generated CSV samples (committed): auth_sample.txt, dns_sample.txt, etc.
 ├── scripts/                # Standalone runnable scripts
 │   ├── fetch_urlhaus.py    # Fetch recent URLs from URLHaus API → sample data/urlhaus_sample.json
-│   └── create_samples.py   # Build samples from data/ → sample data/
-├── src/                    # Core pipeline source code (planned)
-│   ├── ingestion/          # PySpark jobs for landing raw logs in S3 (bronze)
-│   ├── processing/         # Normalization, broadcast joins, enrichment
-│   └── stores/             # HBase schema and write operations
+│   ├── create_samples.py   # Build samples from data/ → sample data/
+│   └── urlhaus_to_parquet.py  # Example: DataFrame → Parquet → S3 (boto3; set S3_URLHAUS_BUCKET in .env)
+├── src/
+│   ├── pipeline_paths.py   # Resolve bronze/silver paths from .env (local or s3:// / s3a://)
+│   ├── spark_bootstrap.py  # SparkSession builder (Windows PySpark fix, optional S3A JARs)
+│   ├── ingestion/          # PySpark read/bronze validation (local or S3 inputs)
+│   ├── processing/         # LANL → Parquet silver (`auth_to_parquet.py`, `dns_to_parquet.py`, …)
+│   └── stores/             # HBase schema and write operations (planned)
 ├── docs/                   # Architecture diagrams and milestone PDF reports
 ├── notebooks/              # Jupyter notebooks for threat hunting (planned)
 ├── .env.example            # Template for environment variables (copy to .env)
@@ -106,7 +110,15 @@ Medallion layout (bronze / silver / gold) is unchanged; **bronze and silver/gold
 
 - **Raw / compressed data:** Place LANL-style files (e.g. `dns.txt.gz`, `flows.txt.gz`, `proc.txt.gz`, `lanl-auth-dataset-1.bz2`) in `data/`. These are not committed (see `.gitignore`).
 - **Sample data:** Generated samples in `sample data/`: LANL-style CSVs (`auth_sample.txt`, `dns_sample.txt`, `flows_sample.txt`, `proc_sample.txt`) and URLHaus JSON (`urlhaus_sample.json`) from `scripts/fetch_urlhaus.py`. These are committed for pipeline testing and M2 evidence.
-- **Production (S3):** Use one or more buckets with clear prefixes, e.g. `s3://your-bucket/bronze/lanl/`, `s3://your-bucket/silver/parquet/`, `s3://your-bucket/gold/`. Spark jobs use these URIs as input/output; on EMR, prefer instance profiles for credentials. For local Spark against S3, configure the Hadoop `s3a` filesystem and AWS credentials per [AWS documentation](https://docs.aws.amazon.com/emr/latest/ManagementGuide/emr-plan-file-systems.html).
+- **Production (S3):** A single bucket can hold **bronze/** (raw), **silver/** (Parquet), and **gold/** (enriched or serving-ready) — the same layout as in the AWS console. Point the variables in `.env.example` at full `s3://` or `s3a://` object/prefix URIs (see commented example for `security-pipeline-lanl`), or upload with `aws s3 cp` / the console.
+
+### Amazon S3 quick reference
+
+1. **Create a bucket** in the same Region as your Spark cluster (e.g. EMR).
+2. **Upload** raw files under a bronze prefix, e.g. `s3://your-bucket/bronze/lanl-auth-dataset-1.bz2`.
+3. **IAM:** Grant the cluster instance profile (or your laptop principal for tests) `s3:ListBucket` on the bucket and `s3:GetObject` / `s3:PutObject` on the relevant object prefixes.
+4. **Spark on EMR:** Use `s3://bucket/prefix/...` in reads/writes; credentials come from the instance profile.
+5. **Local PySpark + S3:** Often needs **`s3a://`** plus **`SPARK_JARS_PACKAGES`** (Hadoop AWS + AWS SDK bundle versions matched to your Spark/Hadoop build). Configure credentials via the [default AWS credential chain](https://docs.aws.amazon.com/sdk-for-java/v1/developer-guide/credentials.html) (`aws configure`, env vars, or SSO). See also [EMR and file systems](https://docs.aws.amazon.com/emr/latest/ManagementGuide/emr-plan-file-systems.html).
 
 ## Data Pipeline Workflow
 
@@ -143,32 +155,32 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
   ```
 
   This script reads the compressed auth file with a simple schema:
-  - `time` (string, event index)
-  - `user` (string, e.g. `U1`, `U2`, …)
-  - `computer` (string, e.g. `C1`, `C2`, …)
+  - `time` (integer, event index)
+  - `source_user` (string)
+  - `source_computer` (string)
 
   Example output:
 
   ```text
   root
-   |-- time: string (nullable = true)
-   |-- user: string (nullable = true)
-   |-- computer: string (nullable = true)
+   |-- time: integer (nullable = true)
+   |-- source_user: string (nullable = true)
+   |-- source_computer: string (nullable = true)
 
-  +----+----+--------+
-  |time|user|computer|
-  +----+----+--------+
-  |1   |U1  |C1      |
-  |1   |U1  |C2      |
-  |2   |U2  |C3      |
-  |3   |U3  |C4      |
-  |6   |U4  |C5      |
-  |7   |U4  |C5      |
-  |7   |U5  |C6      |
-  |8   |U6  |C7      |
-  |11  |U7  |C8      |
-  |12  |U8  |C9      |
-  +----+----+--------+
+  +----+-----------+---------------+
+  |time|source_user|source_computer|
+  +----+-----------+---------------+
+  |1   |U1         |C1             |
+  |1   |U1         |C2             |
+  |2   |U2         |C3             |
+  |3   |U3         |C4             |
+  |6   |U4         |C5             |
+  |7   |U4         |C5             |
+  |7   |U5         |C6             |
+  |8   |U6         |C7             |
+  |11  |U7         |C8             |
+  |12  |U8         |C9             |
+  +----+-----------+---------------+
   only showing top 10 rows
 
   Total rows: 708304516
@@ -318,6 +330,19 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
 
   This demonstrates that the LANL proc dataset (~426M process events) can be ingested and structured for downstream processing.
 
+- **Write LANL silver (Parquet):** With the same raw files (or S3 URIs in `.env`), from project root:
+
+  ```bash
+  python src/processing/auth_to_parquet.py
+  python src/processing/dns_to_parquet.py
+  python src/processing/flows_to_parquet.py
+  python src/processing/proc_to_parquet.py
+  ```
+
+  Outputs go to `Parquet/auth`, `Parquet/dns`, etc., unless `SILVER_PARQUET_URI` is set (e.g. `s3://your-bucket/silver` → `s3://your-bucket/silver/auth`, …).
+
+- **URLHaus rows → S3 Parquet (boto3 example):** Set `S3_URLHAUS_BUCKET` (and optionally `S3_URLHAUS_KEY`, `AWS_REGION`) in `.env`, ensure AWS credentials are available, then run `python scripts/urlhaus_to_parquet.py`.
+
 - **Full pipeline (planned):** Additional ingestion jobs (e.g. `load_lanl.py`), processing via `src/processing/enrich_logs.py`, and analysis in `notebooks/` — to be wired in later milestones.
 
 ## Current status
@@ -331,6 +356,7 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
 | LANL DNS ingestion (PySpark)   | Done (`src/ingestion/ingest_dns.py`, ~40.8M rows, 1 partition)              |
 | LANL flows ingestion (PySpark) | Done (`src/ingestion/ingest_flows.py`, reads `data/flows.txt.gz`)           |
 | LANL proc ingestion (PySpark)  | Done (`src/ingestion/ingest_proc.py`, ~426M rows, 1 partition)              |
+| LANL → Parquet (silver)        | Done (`src/processing/*_to_parquet.py`; paths configurable via `.env`)       |
 | Pipeline orchestration         | Planned (M2)                                                                |
 | Processing / enrichment        | Planned (M3)                                                                |
 

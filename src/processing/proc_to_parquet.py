@@ -1,35 +1,39 @@
 import os
 import sys
+from pathlib import Path
 
-os.environ["PYSPARK_PYTHON"] = sys.executable
-os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
+_SRC = Path(__file__).resolve().parent.parent
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
-from pyspark.sql import SparkSession
+from pipeline_paths import project_root, resolve_input, resolve_parquet_output
+from spark_bootstrap import build_spark_session, is_cloud_storage
+
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-INPUT_PATH  = os.path.join(PROJECT_ROOT, "data", "proc.txt.gz")
-OUTPUT_PATH = os.path.join(PROJECT_ROOT, "Parquet", "proc")
+INPUT_PATH = resolve_input("PROC_INPUT_URI", "proc.txt.gz")
+OUTPUT_PATH = resolve_parquet_output("proc")
 
-print(f"PROJECT_ROOT: {PROJECT_ROOT}")
+print(f"PROJECT_ROOT: {project_root()}")
 print(f"INPUT_PATH:   {INPUT_PATH}")
-print(f"File exists:  {os.path.exists(INPUT_PATH)}")
 print(f"OUTPUT_PATH:  {OUTPUT_PATH}")
+if is_cloud_storage(INPUT_PATH):
+    print("File exists:  n/a (cloud URI)")
+else:
+    print(f"File exists:  {os.path.exists(INPUT_PATH)}")
 
 schema = StructType([
-    StructField("time",         IntegerType(), True),
-    StructField("user_domain",  StringType(),  True),
-    StructField("computer",     StringType(),  True),
-    StructField("process_name", StringType(),  True),
-    StructField("start_end",    StringType(),  True),
+    StructField("time", IntegerType(), True),
+    StructField("user_domain", StringType(), True),
+    StructField("computer", StringType(), True),
+    StructField("process_name", StringType(), True),
+    StructField("start_end", StringType(), True),
 ])
 
-spark = (
-    SparkSession.builder
-    .appName("Ingest Proc Logs")
-    .master("local[*]")
-    .config("spark.sql.parquet.compression.codec", "snappy")
-    .getOrCreate()
+spark = build_spark_session(
+    "Proc to Parquet",
+    cloud_paths=[INPUT_PATH, OUTPUT_PATH],
+    extra_config={"spark.sql.parquet.compression.codec": "snappy"},
 )
 
 df = (
@@ -49,8 +53,8 @@ print(f"Partitions: {df.rdd.getNumPartitions()}")
 
 (
     df.write
-      .mode("overwrite")
-      .parquet(OUTPUT_PATH)
+        .mode("overwrite")
+        .parquet(OUTPUT_PATH)
 )
 
 print(f"Written to: {OUTPUT_PATH}")

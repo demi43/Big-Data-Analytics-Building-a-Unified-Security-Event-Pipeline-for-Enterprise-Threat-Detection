@@ -13,6 +13,6 @@ parquet-tools
 
 duckdb
 
-
-# storage 
+# AWS (S3 upload script + CLI)
+boto3
 awscli
