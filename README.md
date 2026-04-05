@@ -58,13 +58,13 @@ URLHaus API threat feeds (JSON) [https://urlhaus.abuse.ch/api/].
 
 | Layer      | Technology (target)         | M2 status | Notes                                                                                                          |
 | ---------- | --------------------------- | --------- | -------------------------------------------------------------------------------------------------------------- |
-| Storage    | Amazon S3 (bucket prefixes) | Planned   | Raw data currently in local `data/`; samples in `sample data/`. Production: `s3://…/bronze`, `silver`, `gold`. |
+| Storage    | Amazon S3 (bucket prefixes) | Planned   | Raw data currently in local `data/`; samples in `sample data/`. Production: `s3a://…/bronze`, `silver`, `gold` (S3A in PySpark). |
 | Syntax     | Parquet + Snappy            | Planned   | To be used after normalization (M3).                                                                           |
 | Processing | Apache Spark (e.g. EMR)     | Planned   | PySpark in `requirements.txt`; jobs read/write S3 paths.                                                       |
 | Data store | Apache HBase                | Planned   | Schema in `src/stores/`; writes in later milestone.                                                            |
 | Querying   | Spark SQL / DataFrames      | Planned   | Partition pruning, distributed execution.                                                                      |
 
-Medallion layout (bronze / silver / gold) is unchanged; **bronze and silver/gold Parquet layers target S3** instead of HDFS. Current work remains a local proof-of-concept before wiring `s3://` paths and a managed Spark runtime (e.g. EMR).
+Medallion layout (bronze / silver / gold) is unchanged; **bronze and silver/gold Parquet layers target S3** instead of HDFS. Paths use **`s3a://`** for Spark (or `s3://` in `.env`, rewritten to `s3a://` in `pipeline_paths`).
 
 ## Setup
 
@@ -92,7 +92,7 @@ Medallion layout (bronze / silver / gold) is unchanged; **bronze and silver/gold
 │   ├── create_samples.py   # Build samples from data/ → sample data/
 │   └── urlhaus_to_parquet.py  # Example: DataFrame → Parquet → S3 (boto3; set S3_URLHAUS_BUCKET in .env)
 ├── src/
-│   ├── pipeline_paths.py   # Resolve bronze/silver paths from .env (local or s3:// / s3a://)
+│   ├── pipeline_paths.py   # Resolve bronze/silver paths; normalizes s3:// → s3a:// for Spark
 │   ├── spark_bootstrap.py  # SparkSession builder (Windows PySpark fix, optional S3A JARs)
 │   ├── ingestion/          # PySpark read/bronze validation (local or S3 inputs)
 │   ├── processing/         # LANL → Parquet silver (`auth_to_parquet.py`, `dns_to_parquet.py`, …)
@@ -110,14 +110,14 @@ Medallion layout (bronze / silver / gold) is unchanged; **bronze and silver/gold
 
 - **Raw / compressed data:** Place LANL-style files (e.g. `dns.txt.gz`, `flows.txt.gz`, `proc.txt.gz`, `lanl-auth-dataset-1.bz2`) in `data/`. These are not committed (see `.gitignore`).
 - **Sample data:** Generated samples in `sample data/`: LANL-style CSVs (`auth_sample.txt`, `dns_sample.txt`, `flows_sample.txt`, `proc_sample.txt`) and URLHaus JSON (`urlhaus_sample.json`) from `scripts/fetch_urlhaus.py`. These are committed for pipeline testing and M2 evidence.
-- **Production (S3):** A single bucket can hold **bronze/** (raw), **silver/** (Parquet), and **gold/** (enriched or serving-ready) — the same layout as in the AWS console. Point the variables in `.env.example` at full `s3://` or `s3a://` object/prefix URIs (see commented example for `security-pipeline-lanl`), or upload with `aws s3 cp` / the console.
+- **Production (S3):** A single bucket can hold **bronze/** (raw), **silver/** (Parquet), and **gold/** (enriched or serving-ready) — the same layout as in the AWS console. In `.env`, use **`s3a://`** for Spark jobs (or `s3://`; `pipeline_paths` rewrites to `s3a://`). Upload with `aws s3 cp` / the console.
 
 ### Amazon S3 quick reference
 
 1. **Create a bucket** in the same Region as your Spark cluster (e.g. EMR).
-2. **Upload** raw files under a bronze prefix, e.g. `s3://your-bucket/bronze/lanl-auth-dataset-1.bz2`.
+2. **Upload** raw files under a bronze prefix, e.g. `s3a://your-bucket/bronze/lanl-auth-dataset-1.bz2` in Spark (same bucket keys as in the S3 console).
 3. **IAM:** Grant the cluster instance profile (or your laptop principal for tests) `s3:ListBucket` on the bucket and `s3:GetObject` / `s3:PutObject` on the relevant object prefixes.
-4. **Spark on EMR:** Use `s3://bucket/prefix/...` in reads/writes; credentials come from the instance profile.
+4. **Spark on EMR:** `s3://` or `s3a://` both work; credentials come from the instance profile. Local PySpark: prefer **`s3a://`** (this repo normalizes `s3://` → `s3a://` when resolving `.env`).
 5. **Local PySpark + S3:** Often needs **`s3a://`** plus **`SPARK_JARS_PACKAGES`** (Hadoop AWS + AWS SDK bundle versions matched to your Spark/Hadoop build). Configure credentials via the [default AWS credential chain](https://docs.aws.amazon.com/sdk-for-java/v1/developer-guide/credentials.html) (`aws configure`, env vars, or SSO). See also [EMR and file systems](https://docs.aws.amazon.com/emr/latest/ManagementGuide/emr-plan-file-systems.html).
 
 ## Data Pipeline Workflow
@@ -339,7 +339,7 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
   python src/processing/proc_to_parquet.py
   ```
 
-  Outputs go to `Parquet/auth`, `Parquet/dns`, etc., unless `SILVER_PARQUET_URI` is set (e.g. `s3://your-bucket/silver` → `s3://your-bucket/silver/auth`, …).
+  Outputs go to `Parquet/auth`, `Parquet/dns`, etc., unless `SILVER_PARQUET_URI` is set (e.g. `s3a://your-bucket/silver` → `s3a://your-bucket/silver/auth`, …).
 
 - **URLHaus rows → S3 Parquet (boto3 example):** Set `S3_URLHAUS_BUCKET` (and optionally `S3_URLHAUS_KEY`, `AWS_REGION`) in `.env`, ensure AWS credentials are available, then run `python scripts/urlhaus_to_parquet.py`.
 
