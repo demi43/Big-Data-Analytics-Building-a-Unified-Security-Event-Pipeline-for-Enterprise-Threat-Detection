@@ -73,13 +73,18 @@ def build_spark_session(
     paths = [p for p in cloud_paths if p]
     if any(is_cloud_storage(p) for p in paths):
         pkg = os.environ.get("SPARK_JARS_PACKAGES", "").strip()
-        if pkg:
-            b = b.config("spark.jars.packages", pkg)
+        if not pkg:
+            # Align with Spark 4 / Hadoop 3.4 (duration-style defaults). Override via .env if you use Spark 3.5 + 3.3.x only.
+            pkg = "org.apache.hadoop:hadoop-aws:3.4.0,com.amazonaws:aws-java-sdk-bundle:1.12.367"
+        b = b.config("spark.jars.packages", pkg)
 
         b = b.config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+        b = b.config("spark.hadoop.fs.s3.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
         b = b.config("spark.hadoop.fs.s3a.endpoint", "s3.amazonaws.com")
         b = b.config("spark.hadoop.fs.s3a.connection.timeout", "60000")
         b = b.config("spark.hadoop.fs.s3a.socket.timeout", "60000")
+        # Spark 4 can merge Hadoop 3.4 defaults like fs.s3a.threads.keepalivetime=60s; older hadoop-aws used getLong() → NFE.
+        b = b.config("spark.hadoop.fs.s3a.threads.keepalivetime", "60")
 
         access_key = os.environ.get("AWS_ACCESS_KEY_ID", "").strip()
         secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY", "").strip()
