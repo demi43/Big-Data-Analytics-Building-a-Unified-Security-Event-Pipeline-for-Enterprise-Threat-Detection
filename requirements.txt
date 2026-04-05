@@ -10,7 +10,7 @@ pyarrow
 requests
 python-dotenv
 parquet-tools
-
+s3fs
 duckdb
 
 # AWS (S3 upload script + CLI)

@@ -52,4 +52,26 @@ Summary
 
 we installed java 17 for spark and python 3.12 | 
 
-Remove-Item -Recurse -Force C:\tmp\spark\*
+Remove-Item -Recurse -Force C:\tmp\spark\* 
+to remove tmpfiles 
+
+
+Issues Faced:
+1. JAR Version Mismatch ("Version Frankenstein")
+PySpark ships with Hadoop 3.3 internals. Using hadoop-aws:3.4.0 introduced class files expecting methods only in Hadoop 3.4, while using hadoop-aws:3.3.6 still caused issues because Parquet's VectorIoBridge called VectoredReadUtils.validateNonOverlappingAndReturnSortedRanges() — a method added in Hadoop 3.4. This triggered NoSuchMethodError during every Parquet read from S3.
+2. Vectored I/O Conflict
+Modern Parquet readers use vectored I/O to read multiple file chunks simultaneously for speed. On Windows this failed both due to the version mismatch above and how the JVM interacts with native filesystem calls. Disabling it required targeting three layers simultaneously: JVM startup flags via spark.driver.extraJavaOptions and spark.executor.extraJavaOptions, Spark SQL config (spark.sql.parquet.enableVectorizedReader), and the Hadoop S3A filesystem property (spark.hadoop.fs.s3a.vectored.read.enabled). Earlier attempts using SPARK_SUBMIT_OPTS and runtime Spark configs alone failed because they don't reach the Parquet layer early enough on Windows.
+3. Duration String Parsing Bug
+Hadoop 3.3+ introduced human-readable duration strings like 60s and 24h in its default config files. The environment was calling getLong() instead of getDuration(), meaning the Java Long parser received strings with letters and threw NumberFormatException. Fixed by overriding all duration-style defaults with pure numeric millisecond values (e.g. 86400000 for 24 hours).
+4. Windows Environment Initialization
+PySpark on Windows fails to locate the correct Python executable and winutils.exe needed for local file operations out of the box. Additionally, HADOOP_HOME was set to C:\hadoop\bin instead of C:\hadoop, causing Spark to construct a doubled path \bin\bin\winutils.exe. Fixed by sanitizing the environment before SparkSession is built — forcing PYSPARK_PYTHON and PYSPARK_DRIVER_PYTHON to sys.executable, and normalizing HADOOP_HOME to strip the trailing \bin if present.
+5. S3A Connector Not Included
+PySpark doesn't ship with the S3A connector. The hadoop-aws and aws-java-sdk-bundle JARs had to be pulled in explicitly via spark.jars.packages, with Maven resolving and caching them via Ivy on first run.
+6. Column Name and Path Mismatches
+The silver Parquet schemas written to S3 used different names than the pipeline code assumed — source_computer instead of computer, source_user instead of user, S3 folder proc instead of processes. URLHaus stored full URLs rather than bare hostnames, so the join key required extracting the hostname with regexp_extract before joining against dst_computer. All of these required runtime inspection of actual schemas before the joins could be fixed.
+Final Technical Baseline
+
+Connector: hadoop-aws:3.3.6 matched to Spark's internal Hadoop version
+I/O mode: legacy sequential reader with vectored I/O disabled at all three layers
+Config style: pure numeric values, no time-unit suffixes
+Windows bootstrap: explicit Python executable and normalized HADOOP_HOME set before JVM initialization

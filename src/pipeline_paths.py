@@ -46,3 +46,11 @@ def resolve_parquet_output(subdir: str) -> str:
     root = os.environ.get("PARQUET_OUTPUT_ROOT", "").strip()
     base = Path(root) if root else _ROOT / "Parquet"
     return str(base / subdir)
+
+def resolve_gold_output(subdir: str) -> str:
+    gold = os.environ.get("GOLD_PARQUET_URI", "").strip().rstrip("/")
+    if gold:
+        return f"{to_s3a(gold)}/{subdir}"
+    root = os.environ.get("PARQUET_OUTPUT_ROOT", "").strip()
+    base = Path(root) if root else _ROOT / "Parquet"
+    return str(base / "gold" / subdir)
