@@ -56,13 +56,13 @@ URLHaus API threat feeds (JSON) [https://urlhaus.abuse.ch/api/].
 
 **Stack layers — implementation status:**
 
-| Layer      | Technology (target)         | Status  | Notes                                                                                |
-| ---------- | --------------------------- | ------- | ------------------------------------------------------------------------------------ |
-| Storage    | Amazon S3 (bucket prefixes) | Done    | Configured for bronze, silver, and gold layers; Parquet files uploaded to S3 bucket. |
-| Syntax     | Parquet + Snappy            | Done    | Implemented for silver layer normalization; outputs to `Parquet/` subdirs.           |
-| Processing | Apache Spark (e.g. EMR)     | Done    | PySpark in `requirements.txt`; jobs read/write local and S3 paths.                   |
-| Data store | Apache HBase                | Planned | Schema in `src/stores/`; writes in later milestone.                                  |
-| Querying   | Spark SQL / DataFrames      | Done    | Partition pruning, distributed execution; notebooks for analytics.                   |
+| Layer      | Technology (target)         | Status      | Notes                                                                                |
+| ---------- | --------------------------- | ----------- | ------------------------------------------------------------------------------------ |
+| Storage    | Amazon S3 (bucket prefixes) | Done        | Configured for bronze, silver, and gold layers; Parquet files uploaded to S3 bucket. |
+| Syntax     | Parquet + Snappy            | Done        | Implemented for silver layer normalization; outputs to `Parquet/` subdirs.           |
+| Processing | Apache Spark (e.g. EMR)     | Done        | PySpark in `requirements.txt`; jobs read/write local and S3 paths.                   |
+| Data store | Apache HBase                | in progress | Schema in `src/stores/`; writes in later milestone.                                  |
+| Querying   | Spark SQL / DataFrames      | Done        | Partition pruning, distributed execution; notebooks for analytics.                   |
 
 Medallion layout (bronze / silver / gold) is unchanged; **bronze and silver/gold Parquet layers target S3** instead of HDFS. Paths use **`s3a://`** for Spark (or `s3://` in `.env`, rewritten to `s3a://` in `pipeline_paths`).
 
