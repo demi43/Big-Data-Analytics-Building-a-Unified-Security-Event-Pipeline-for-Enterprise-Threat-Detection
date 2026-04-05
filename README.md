@@ -69,17 +69,44 @@ Medallion layout (bronze / silver / gold) is unchanged; **bronze and silver/gold
 ## Setup
 
 - **Python:** 3.9+ recommended.
+- **Java:** Install JDK 11 or 17 and make sure `JAVA_HOME` is set and `%JAVA_HOME%\bin` is on `PATH`.
+- **Hadoop / HADOOP_HOME:** If Spark reports Hadoop missing in the environment, install a compatible Hadoop distribution and set `HADOOP_HOME` to the Hadoop root directory, then add `%HADOOP_HOME%\bin` to `PATH`.
 - **Dependencies:** From the project root, run:
   ```bash
   pip install -r requirements.txt
   ```
+- **Spark / PySpark:** `pyspark` in `requirements.txt` installs the Python Spark bindings and Spark runtime wheel, but Spark still requires a working Java runtime.
 - **Optional:** Use a virtual environment (`python -m venv venv`, then activate and run the above).
+
+### Quick local setup
+
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+If you want to run the pipeline scripts from a fresh clone, you should also:
+
+- Create `.env` from `.env.example`:
+  ```powershell
+  copy .env.example .env
+  ```
+- Fill in any required values for your environment.
 
 ## Environment
 
 - Copy `.env.example` to `.env` and set `URLHAUS_API_KEY` for the URLHaus fetch script (free key at [auth.abuse.ch](https://auth.abuse.ch/)). Sample generation from local files does not require any keys.
 - Do **not** commit `.env` or real credentials; `.env` is listed in `.gitignore`.
 - **Pipeline paths:** Ingestion and `*_to_parquet.py` scripts load `.env` via `src/pipeline_paths.py`. Optional variables include per-dataset bronze URIs (`AUTH_INPUT_URI`, `DNS_INPUT_URI`, `FLOWS_INPUT_URI`, `PROC_INPUT_URI`), silver output (`SILVER_PARQUET_URI` or `PARQUET_OUTPUT_ROOT`), Spark tuning (`SPARK_MASTER`, `SPARK_DRIVER_MEMORY`, …), and URLHaus S3 upload (`S3_URLHAUS_BUCKET`, `S3_URLHAUS_KEY`, `AWS_REGION`). When unset, inputs default to `DATA_DIR` (default `data/`) and Parquet output to `Parquet/<dataset>/` under the project root.
+
+## Common setup issues
+
+- `java` not found: install JDK 11 or 17 and verify `JAVA_HOME` is set and `%JAVA_HOME%\bin` is on `PATH`.
+- PySpark import or Spark session failure: make sure `pyspark` is installed and Java is available; the repo uses Spark through `pyspark`, not plain pandas.
+- `.env` missing: copy `.env.example` to `.env` before running scripts that rely on environment variables.
+- Missing data files: this repo does not commit raw LANL input data in `data/`; place your input files in `data/` or use the sample data generation script.
+- S3 / URLHaus access: if you use cloud paths or URLHaus scripts, ensure valid AWS credentials and `URLHAUS_API_KEY` are configured.
 
 ## Project Structure
 
