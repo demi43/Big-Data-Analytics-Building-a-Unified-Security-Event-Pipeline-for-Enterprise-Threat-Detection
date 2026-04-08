@@ -397,7 +397,7 @@ Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compre
 
   This script performs a broadcast hash join to enrich events with threat indicators, outputting enriched data for analysis.
 
-- **Full pipeline (planned):** Additional ingestion jobs (e.g. `load_lanl.py`), processing via `src/processing/enrich_logs.py`, and analysis in `notebooks/` — to be wired in later milestones.
+- **Full pipeline (done):** Additional ingestion jobs (e.g. `load_lanl.py`), processing via `src/processing/enrich_logs.py`, and analysis in `notebooks/` — to be wired in later milestones.
 
 ## Current status
 
@@ -453,6 +453,7 @@ Metrics for Success
 Throughput: Total events processed per second.
 Latency: Total execution time for a 58-day log batch.
 Data Fidelity: Percentage of records successfully correlated with threat intel feeds.
+
 Author: Olaoluwa Adedamola Omodemi
 Institution: Kennesaw State University
 Department: College of Computing and Software Engineering
