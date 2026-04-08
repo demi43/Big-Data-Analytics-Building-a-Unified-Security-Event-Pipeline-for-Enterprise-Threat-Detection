@@ -32,7 +32,7 @@ URLHaus API threat feeds (JSON) [https://urlhaus.abuse.ch/api/].
 
   LANL (auth, dns,                ┌─────────────────┐
   flows, proc)  ─────────────────►│  Ingestion      │   Local: data/ + create_samples.py
-  (file / API)                    │  (Bronze)       │   S3: s3a://bucket/bronze (planned)
+  (file / API)                    │  (Bronze)       │   S3: s3a://bucket/bronze 
                                   └────────┬────────┘
                                            │
   URLHaus (threat intel)  ────────►        ▼
@@ -44,7 +44,7 @@ URLHaus API threat feeds (JSON) [https://urlhaus.abuse.ch/api/].
                                            ▼
                                   ┌─────────────────┐     ┌─────────────────┐
                                   │  Enrichment      │────►│  Storage         │   Local: enriched data
-                                  │  (Gold)          │     │  (CSV/Parquet)   │   HBase: planned
+                                  │  (Gold)          │     │  (CSV/Parquet)   │   HBase: in progress
                                   └─────────────────┘     └────────┬────────┘
                                                                    │
                                                                    ▼
