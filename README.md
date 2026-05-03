@@ -1,461 +1,331 @@
-## Unified Security Event Pipeline for Enterprise Threat Detection
+# Unified Security Event Pipeline for Enterprise Threat Detection
 
-** Big Data Analytics **
+**CS 4265 — Big Data Analytics | Kennesaw State University**
 
 ## Overview
 
-This project implements a scalable distributed data pipeline designed to ingest, process, and enrich massive enterprise-scale security telemetry. By correlating the **LANL Unified Host and Network Dataset** (~700M events) with real-time threat intelligence feeds (URLHaus), the system enables the detection of sophisticated cyber threats such as lateral movement and compromised credentials.
+A scalable distributed data pipeline that ingests, processes, and enriches massive enterprise-scale security telemetry. By correlating the **LANL Unified Host and Network Dataset** (~700M events) with real-time threat intelligence from URLHaus, the system enables detection of sophisticated cyber threats such as lateral movement, compromised credentials, and connections to known malicious hosts.
 
-## The Big Data Stack
+---
 
-The architecture is designed to handle the **Volume, Variety, and Velocity** of security logs by leveraging a layered distributed system:
-
-| Layer          | Technology                     | Core Big Data Concept                                              |
-| :------------- | :----------------------------- | :----------------------------------------------------------------- |
-| **Storage**    | Amazon S3                      | Durable object storage, prefixes per layer, lifecycle & encryption |
-| **Processing** | Apache Spark on AWS (e.g. EMR) | Parallel DAG execution; S3 as read/write data lake                 |
-| **Data Store** | Apache HBase                   | Wide-column Model, LSM-Trees, & Column Families                    |
-| **Syntax**     | Apache Parquet                 | Columnar Storage with Snappy Compression                           |
-| **Querying**   | Spark SQL / DataFrames         | Distributed Execution & Partition-aware Querying                   |
-
-LANL User-Computer Auth logs (CSV) [https://csr.lanl.gov/data/cyber1/],
-LANL Unified Host/Network logs (CSV) [https://csr.lanl.gov/data/auth/], and
-URLHaus API threat feeds (JSON) [https://urlhaus.abuse.ch/api/].
-
-## Architecture
-
-**Pipeline flow (current implementation):**
-
-```text
-  Data Sources                    Pipeline Stages                    Storage / Output
-  ─────────────                   ───────────────                    ────────────────
-
-  LANL (auth, dns,                ┌─────────────────┐
-  flows, proc)  ─────────────────►│  Ingestion      │   Local: data/ + create_samples.py
-  (file / API)                    │  (Bronze)       │   S3: s3a://bucket/bronze 
-                                  └────────┬────────┘
-                                           │
-  URLHaus (threat intel)  ────────►        ▼
-  (JSON API)                      ┌─────────────────┐
-                                  │  Normalization  │   Spark DataFrames → Parquet
-                                  │  (Silver)       │   Local: Parquet/ subdirs
-                                  └────────┬────────┘
-                                           │
-                                           ▼
-                                  ┌─────────────────┐     ┌─────────────────┐
-                                  │  Enrichment      │────►│  Storage         │   Local: enriched data
-                                  │  (Gold)          │     │  (CSV/Parquet)   │   HBase: in progress
-                                  └─────────────────┘     └────────┬────────┘
-                                                                   │
-                                                                   ▼
-                                  ┌─────────────────┐     ┌─────────────────┐
-                                  │  Querying       │◄────│  Spark SQL /     │   Notebooks: threat hunting
-                                  │  (Analytics)    │     │  DataFrames      │
-                                  └─────────────────┘     └─────────────────┘
-```
-
-**Stack layers — implementation status:**
-
-| Layer      | Technology (target)         | Status      | Notes                                                                                |
-| ---------- | --------------------------- | ----------- | ------------------------------------------------------------------------------------ |
-| Storage    | Amazon S3 (bucket prefixes) | Done        | Configured for bronze, silver, and gold layers; Parquet files uploaded to S3 bucket. |
-| Syntax     | Parquet + Snappy            | Done        | Implemented for silver layer normalization; outputs to `Parquet/` subdirs.           |
-| Processing | Apache Spark (e.g. EMR)     | Done        | PySpark in `requirements.txt`; jobs read/write local and S3 paths.                   |
-| Data store | Apache HBase                | in progress | Schema in `src/stores/`; writes in later milestone.                                  |
-| Querying   | Spark SQL / DataFrames      | Done        | Partition pruning, distributed execution; notebooks for analytics.                   |
-
-Medallion layout (bronze / silver / gold) is unchanged; **bronze and silver/gold Parquet layers target S3** instead of HDFS. Paths use **`s3a://`** for Spark (or `s3://` in `.env`, rewritten to `s3a://` in `pipeline_paths`).
-
-## Setup
-
-- **Python:** 3.9+ recommended.
-- **Java:** Install JDK 11 or 17 and make sure `JAVA_HOME` is set and `%JAVA_HOME%\bin` is on `PATH`.
-- **Hadoop / HADOOP_HOME:** If Spark reports Hadoop missing in the environment, install a compatible Hadoop distribution and set `HADOOP_HOME` to the Hadoop root directory, then add `%HADOOP_HOME%\bin` to `PATH`.
-- **Dependencies:** From the project root, run:
-  ```bash
-  pip install -r requirements.txt
-  ```
-- **Spark / PySpark:** `pyspark` in `requirements.txt` installs the Python Spark bindings and Spark runtime wheel, but Spark still requires a working Java runtime.
-- **Optional:** Use a virtual environment (`python -m venv venv`, then activate and run the above).
-
-### Quick local setup
+## Quick Start
 
 ```powershell
+# 1. Clone and set up the environment
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+
+# 2. Configure credentials
+copy .env.example .env
+# Edit .env: set URLHAUS_API_KEY and (optionally) AWS credentials + S3 URIs
+
+# 3. Place raw LANL data files in data/
+#    lanl-auth-dataset-1.bz2, dns.txt.gz, flows.txt.gz, proc.txt.gz
+
+# 4. Run the full pipeline
+python executepipeline.py
 ```
 
-If you want to run the pipeline scripts from a fresh clone, you should also:
+---
 
-- Create `.env` from `.env.example`:
-  ```powershell
-  copy .env.example .env
-  ```
-- Fill in any required values for your environment.
+## Running the Pipeline
 
-## Environment
+`executepipeline.py` runs all five stages in sequence and prints a per-stage runtime summary at the end.
 
-- Copy `.env.example` to `.env` and set `URLHAUS_API_KEY` for the URLHaus fetch script (free key at [auth.abuse.ch](https://auth.abuse.ch/)). Sample generation from local files does not require any keys.
-- Do **not** commit `.env` or real credentials; `.env` is listed in `.gitignore`.
-- **Pipeline paths:** Ingestion and `*_to_parquet.py` scripts load `.env` via `src/pipeline_paths.py`. Optional variables include per-dataset bronze URIs (`AUTH_INPUT_URI`, `DNS_INPUT_URI`, `FLOWS_INPUT_URI`, `PROC_INPUT_URI`), silver output (`SILVER_PARQUET_URI` or `PARQUET_OUTPUT_ROOT`), Spark tuning (`SPARK_MASTER`, `SPARK_DRIVER_MEMORY`, …), and URLHaus S3 upload (`S3_URLHAUS_BUCKET`, `S3_URLHAUS_KEY`, `AWS_REGION`). When unset, inputs default to `DATA_DIR` (default `data/`) and Parquet output to `Parquet/<dataset>/` under the project root.
+```powershell
+python executepipeline.py                 # full pipeline
+python executepipeline.py --skip-fetch    # use cached URLHaus data (no API call)
+python executepipeline.py --skip-silver   # skip Silver stage (Parquet already exists)
+python executepipeline.py --skip-gold     # skip Gold enrichment
+python executepipeline.py --validate-only # validation and data quality report only
+```
 
-## Common setup issues
+### Pipeline stages
 
-- `java` not found: install JDK 11 or 17 and verify `JAVA_HOME` is set and `%JAVA_HOME%\bin` is on `PATH`.
-- PySpark import or Spark session failure: make sure `pyspark` is installed and Java is available; the repo uses Spark through `pyspark`, not plain pandas.
-- `.env` missing: copy `.env.example` to `.env` before running scripts that rely on environment variables.
-- Missing data files: this repo does not commit raw LANL input data in `data/`; place your input files in `data/` or use the sample data generation script.
-- S3 / URLHaus access: if you use cloud paths or URLHaus scripts, ensure valid AWS credentials and `URLHAUS_API_KEY` are configured.
+| #   | Stage                 | Script(s)                        | Output                                 |
+| --- | --------------------- | -------------------------------- | -------------------------------------- |
+| 1   | **URLHaus fetch**     | `scripts/fetch_urlhaus.py`       | `sample data/urlhaus_sample.json`      |
+| 2   | **URLHaus → Parquet** | inline (pandas + pyarrow)        | `Parquet/urlhaus/` or S3               |
+| 3   | **Silver layer**      | `src/processing/*_to_parquet.py` | `Parquet/{auth,dns,flows,proc}/` or S3 |
+| 4   | **Gold layer**        | `src/scripts/enrich.py`          | `Parquet/gold/user_activity_summary/`  |
+| 5   | **Validation**        | inline                           | record counts, sample rows, null rates |
+
+### Example summary output
+
+```
+============================================================
+Pipeline Complete
+============================================================
+  Stage                  Status         Time
+  ------------------------------------------
+  1  URLHaus fetch        OK            1.0s
+  2  URLHaus parquet      OK            2.3s
+  3  Silver layer         OK       27m 28.4s
+  4  Gold layer           OK       10m 47.1s
+  5  Validation           OK            9.1s
+  ------------------------------------------
+  TOTAL                            38m 27.9s
+
+  Started: 09:02:38 | Finished: 09:41:06 | Total time:38m 27.9s
+```
+
+---
+
+## Architecture
+
+```text
+  Data Sources                    Pipeline Stages                    Output
+  ────────────                    ───────────────                    ──────
+                                  ┌─────────────────┐
+  LANL (auth, dns,   ────────────►│  Bronze          │  data/*.bz2 / *.gz
+  flows, proc)                    │  Raw ingestion   │  S3: bucket/bronze/
+                                  └────────┬────────┘
+                                           │
+  URLHaus threat     ────────────►         ▼
+  intel (JSON API)               ┌─────────────────┐
+                                  │  Silver          │  Parquet/  (Snappy)
+                                  │  Normalization  │  S3: bucket/silver/
+                                  └────────┬────────┘
+                                           │
+                                           ▼
+                                  ┌─────────────────┐
+                                  │  Gold            │  Parquet/gold/
+                                  │  Enrichment      │  user_activity_summary/
+                                  └────────┬────────┘
+                                           │
+                                           ▼
+                                  ┌─────────────────┐
+                                  │  Analytics       │  notebooks/threat_hunting.ipynb
+                                  │  Threat Hunting  │
+                                  └─────────────────┘
+```
+
+### Technology stack
+
+| Layer            | Technology              | Role                                                    |
+| ---------------- | ----------------------- | ------------------------------------------------------- |
+| **Storage**      | Amazon S3               | Durable object storage; bronze / silver / gold prefixes |
+| **Processing**   | Apache Spark (PySpark)  | Parallel DAG execution; reads/writes local and S3       |
+| **Format**       | Apache Parquet + Snappy | Columnar storage; predicate pushdown and compression    |
+| **Threat Intel** | URLHaus API (abuse.ch)  | Real-time malicious URL feed                            |
+| **Querying**     | Spark SQL / DataFrames  | Distributed execution, partition-aware queries          |
+| **Analytics**    | Jupyter Notebooks       | Interactive threat hunting                              |
+
+### Medallion layout
+
+- **Bronze** — raw compressed LANL files (`data/`) or S3 `bucket/bronze/`
+- **Silver** — schema-validated Parquet (`Parquet/` or S3 `bucket/silver/`)
+- **Gold** — enriched aggregations joined with URLHaus IoCs (`Parquet/gold/` or S3 `bucket/gold/`)
+
+---
+
+## Data Sources
+
+| Dataset    | Format     | Size         | Description                         |
+| ---------- | ---------- | ------------ | ----------------------------------- |
+| LANL Auth  | `.bz2` CSV | ~708M rows   | User–computer authentication events |
+| LANL DNS   | `.gz` CSV  | ~40.8M rows  | DNS resolution queries              |
+| LANL Flows | `.gz` CSV  | —            | Network flow records (9 fields)     |
+| LANL Proc  | `.gz` CSV  | ~426M rows   | Process start/end events            |
+| URLHaus    | JSON API   | 20–1000 URLs | Live malicious URL and host feed    |
+
+LANL dataset: <https://csr.lanl.gov/data/cyber1/>  
+URLHaus API: <https://urlhaus.abuse.ch/api/>
+
+---
+
+## Setup
+
+### Requirements
+
+- Python 3.9+
+- Java 11 or 17 (`JAVA_HOME` set, `%JAVA_HOME%\bin` on `PATH`)
+- Hadoop (optional on Windows; set `HADOOP_HOME` if Spark reports it missing)
+
+### Install dependencies
+
+```powershell
+pip install -r requirements.txt
+```
+
+### Configure environment
+
+```powershell
+copy .env.example .env
+```
+
+Key variables in `.env`:
+
+| Variable                                      | Required       | Description                                           |
+| --------------------------------------------- | -------------- | ----------------------------------------------------- |
+| `URLHAUS_API_KEY`                             | For live fetch | Free key from [auth.abuse.ch](https://auth.abuse.ch/) |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | For S3         | AWS credentials                                       |
+| `AWS_REGION`                                  | For S3         | e.g. `us-east-2`                                      |
+| `AUTH_INPUT_URI` etc.                         | For S3 input   | `s3a://bucket/bronze/lanl-auth-dataset-1.bz2`         |
+| `SILVER_PARQUET_URI`                          | For S3 output  | `s3a://bucket/silver`                                 |
+| `S3_URLHAUS_BUCKET`                           | For S3 upload  | Bucket name for URLHaus Parquet                       |
+
+When S3 variables are **not set**, the pipeline reads from `data/` and writes to `Parquet/` locally.
+
+### Place raw data
+
+Put LANL compressed files in the `data/` directory:
+
+```
+data/
+├── lanl-auth-dataset-1.bz2
+├── dns.txt.gz
+├── flows.txt.gz
+└── proc.txt.gz
+```
+
+These files are excluded from git (see `.gitignore`). Sample data for testing is committed under `sample data/`.
+
+---
 
 ## Project Structure
 
-```text
+```
 /
-├── data/                   # Raw/compressed LANL-style files (not committed; place *.gz, *.bz2 here)
-├── sample data/            # Generated CSV samples (committed): auth_sample.txt, dns_sample.txt, etc.
-├── scripts/                # Standalone runnable scripts
-│   ├── fetch_urlhaus.py    # Fetch recent URLs from URLHaus API → sample data/urlhaus_sample.json
-│   ├── create_samples.py   # Build samples from data/ → sample data/
-│   └── urlhaus_to_parquet.py  # Example: DataFrame → Parquet → S3 (boto3; set S3_URLHAUS_BUCKET in .env)
+├── executepipeline.py          # End-to-end pipeline runner (all 5 stages)
+├── requirements.txt            # Pinned Python dependencies
+├── .env.example                # Credential and path template (copy to .env)
+├── .gitignore
+│
+├── data/                       # Raw compressed LANL files (not committed)
+├── sample data/                # Small samples committed for testing
+│   ├── auth_sample.txt
+│   ├── dns_sample.txt
+│   ├── flows_sample.txt
+│   ├── proc_sample.txt
+│   └── urlhaus_sample.json
+│
 ├── src/
-│   ├── pipeline_paths.py   # Resolve bronze/silver paths; normalizes s3:// → s3a:// for Spark
-│   ├── spark_bootstrap.py  # SparkSession builder (Windows PySpark fix, optional S3A JARs)
-│   ├── ingestion/          # PySpark read/bronze validation (local or S3 inputs)
+│   ├── pipeline_paths.py       # Resolve bronze/silver/gold paths; s3:// → s3a://
+│   ├── spark_bootstrap.py      # SparkSession factory (Windows + S3A fixes)
+│   ├── ingestion/              # Bronze layer — read and validate raw data
 │   │   ├── ingest_auth_logs.py
 │   │   ├── ingest_dns.py
 │   │   ├── ingest_flows.py
 │   │   └── ingest_proc.py
-│   ├── processing/         # LANL → Parquet silver
+│   ├── processing/             # Silver layer — CSV/bz2 → Parquet
 │   │   ├── auth_to_parquet.py
 │   │   ├── dns_to_parquet.py
 │   │   ├── flows_to_parquet.py
 │   │   └── proc_to_parquet.py
-│   ├── scripts/            # Enrichment and other scripts
-│   │   └── enrich.py       # Gold layer enrichment with threat intelligence
-│   └── stores/             # HBase schema and write operations (planned)
-├── docs/                   # Architecture diagrams and milestone PDF reports
-├── notebooks/              # Jupyter notebooks for threat hunting
-│   └── threat_hunting.ipynb
-├── Parquet/                # Silver layer Parquet outputs
+│   └── scripts/
+│       └── enrich.py           # Gold layer — join flows + auth + proc + URLHaus IoCs
+│
+├── scripts/
+│   ├── fetch_urlhaus.py        # Fetch threat intel from URLHaus API
+│   ├── create_samples.py       # Build small CSV samples from compressed data
+│   └── urlhaus_to_parquet.py   # Upload URLHaus JSON to S3 as Parquet (boto3)
+│
+├── Parquet/                    # Silver and Gold Parquet outputs (local mode)
 │   ├── auth/
 │   ├── dns/
 │   ├── flows/
-│   └── proc/
-├── .env.example            # Template for environment variables (copy to .env)
-├── .gitignore              # Excludes large data, .env, venv, Spark temp files
-├── .gitattributes         # Line-ending normalization
-├── requirements.txt        # Python dependencies (pyspark, pandas, requests, etc.)
-├── README.md               # This file
-├── documentation.tex       # LaTeX documentation compiled from README and notes
-├── notes.txt               # Technical notes and troubleshooting
-└── executepipeline.py      # Pipeline execution script
+│   ├── proc/
+│   ├── urlhaus/
+│   └── gold/user_activity_summary/
+│
+├── notebooks/
+│   └── threat_hunting.ipynb   # Interactive threat detection queries
+│
+└── docs/                       # Milestone reports and architecture docs
 ```
 
-## Storage
+---
 
-- **Raw / compressed data:** Place LANL-style files (e.g. `dns.txt.gz`, `flows.txt.gz`, `proc.txt.gz`, `lanl-auth-dataset-1.bz2`) in `data/`. These are not committed (see `.gitignore`).
-- **Sample data:** Generated samples in `sample data/`: LANL-style CSVs (`auth_sample.txt`, `dns_sample.txt`, `flows_sample.txt`, `proc_sample.txt`) and URLHaus JSON (`urlhaus_sample.json`) from `scripts/fetch_urlhaus.py`. These are committed for pipeline testing and M2 evidence.
-- **Production (S3):** A single bucket can hold **bronze/** (raw), **silver/** (Parquet), and **gold/** (enriched or serving-ready) — the same layout as in the AWS console. In `.env`, use **`s3a://`** for Spark jobs (or `s3://`; `pipeline_paths` rewrites to `s3a://`). Upload with `aws s3 cp` / the console.
+## Gold Layer Output Schema
 
-### Amazon S3 quick reference
+The Gold layer produces `user_activity_summary` — one row per (user, computer, 1-hour bucket):
 
-1. **Create a bucket** in the same Region as your Spark cluster (e.g. EMR).
-2. **Upload** raw files under a bronze prefix, e.g. `s3a://your-bucket/bronze/lanl-auth-dataset-1.bz2` in Spark (same bucket keys as in the S3 console).
-3. **IAM:** Grant the cluster instance profile (or your laptop principal for tests) `s3:ListBucket` on the bucket and `s3:GetObject` / `s3:PutObject` on the relevant object prefixes.
-4. **Spark on EMR:** `s3://` or `s3a://` both work; credentials come from the instance profile. Local PySpark: prefer **`s3a://`** (this repo normalizes `s3://` → `s3a://` when resolving `.env`).
-5. **Local PySpark + S3:** Often needs **`s3a://`** plus **`SPARK_JARS_PACKAGES`** (Hadoop AWS + AWS SDK bundle versions matched to your Spark/Hadoop build). Configure credentials via the [default AWS credential chain](https://docs.aws.amazon.com/sdk-for-java/v1/developer-guide/credentials.html) (`aws configure`, env vars, or SSO). See also [EMR and file systems](https://docs.aws.amazon.com/emr/latest/ManagementGuide/emr-plan-file-systems.html).
+| Column             | Type   | Description                            |
+| ------------------ | ------ | -------------------------------------- |
+| `time_bucket`      | long   | Unix timestamp floored to the hour     |
+| `user`             | string | Anonymized user from auth logs         |
+| `src_computer`     | string | Source computer                        |
+| `total_flows`      | long   | Network flow count in the bucket       |
+| `total_bytes`      | long   | Total bytes transferred                |
+| `total_packets`    | long   | Total packets transferred              |
+| `active_processes` | long   | Distinct processes observed            |
+| `malicious_hits`   | long   | Flows to URLHaus-listed hosts (0 or 1) |
 
-## Data Pipeline Workflow
+---
 
-Ingestion (Bronze): Raw LANL logs are landed in **S3** under a bronze prefix (future full run); for local development they are ingested directly from `data/` using PySpark.
-Normalization (Silver): Spark DataFrames enforce schema validation and normalize heterogeneous formats.
-Enrichment (Gold): A Broadcast Hash Join correlates host activity with malicious URL feeds to identify Indicators of Compromise (IoCs).
-Indexing: Enriched events are stored in HBase, utilizing a custom row-key design to prevent region hotspotting and enable low-latency lookups.
+## Generating Sample Data
 
-Creating data samples (local)
-To build small CSV samples from the compressed data in `data/` (for local runs and notebooks), use:
+To build small CSV samples from the compressed LANL files (useful for local testing):
 
 ```bash
 python scripts/create_samples.py
+python scripts/create_samples.py --lines 1000 --random --seed 42
 ```
 
-Options: `--lines 10000` (default), `--random` for reservoir sampling, `--compress` to write `.gz`, `--seed 42` when using `--random`. Outputs go to `sample data/` (e.g. `dns_sample.txt`, `flows_sample.txt`, `proc_sample.txt`, `auth_sample.txt`).
+Output goes to `sample data/`. The `--random` flag uses reservoir sampling for a representative subset.
 
-## How to run
+---
 
-- **Fetch URLHaus threat feed (data acquisition):** Set `URLHAUS_API_KEY` in `.env` (get a free key at [auth.abuse.ch](https://auth.abuse.ch/)), then from project root:
-  ```bash
-  python scripts/fetch_urlhaus.py
-  ```
-  Saves `sample data/urlhaus_sample.json` (default 20 URLs). Use `--limit 50` for more. Console output and the saved file are evidence of working acquisition.
-- **Create sample data (LANL-style local files):** From project root, run `python scripts/create_samples.py`. Use `--lines 1000` for a small sample suitable for git.
-- **Ingest LANL auth dataset (PySpark):** Ensure `data/lanl-auth-dataset-1.bz2` is present, then from project root:
+## Running Individual Stages
 
-  ```bash
-  # PySpark via Python
-  python src/ingestion/ingest_auth_logs.py
+If you need to run a single stage rather than the full pipeline:
 
-  # or, using spark-submit if Spark is installed system-wide
-  spark-submit src/ingestion/ingest_auth_logs.py
-  ```
+```bash
+# Threat intel
+python scripts/fetch_urlhaus.py --limit 50
 
-  This script reads the compressed auth file with a simple schema:
-  - `time` (integer, event index)
-  - `source_user` (string)
-  - `source_computer` (string)
+# Silver layer
+python src/processing/auth_to_parquet.py
+python src/processing/dns_to_parquet.py
+python src/processing/flows_to_parquet.py
+python src/processing/proc_to_parquet.py
 
-  Example output:
+# Gold layer
+python src/scripts/enrich.py
 
-  ```text
-  root
-   |-- time: integer (nullable = true)
-   |-- source_user: string (nullable = true)
-   |-- source_computer: string (nullable = true)
+# Ingestion (validation / exploration only)
+python src/ingestion/ingest_auth_logs.py
+```
 
-  +----+-----------+---------------+
-  |time|source_user|source_computer|
-  +----+-----------+---------------+
-  |1   |U1         |C1             |
-  |1   |U1         |C2             |
-  |2   |U2         |C3             |
-  |3   |U3         |C4             |
-  |6   |U4         |C5             |
-  |7   |U4         |C5             |
-  |7   |U5         |C6             |
-  |8   |U6         |C7             |
-  |11  |U7         |C8             |
-  |12  |U8         |C9             |
-  +----+-----------+---------------+
-  only showing top 10 rows
+---
 
-  Total rows: 708304516
-  Partitions: 18
-  ```
+## Common Issues
 
-  This demonstrates that the full LANL auth dataset (~708M rows) can be ingested and distributed across Spark partitions for downstream processing.
+| Problem                        | Fix                                                                                            |
+| ------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `java` not found               | Install JDK 11 or 17; set `JAVA_HOME` and add `%JAVA_HOME%\bin` to `PATH`                      |
+| Spark session fails on Windows | Set `HADOOP_HOME=C:\hadoop` (no trailing `\bin`) and add `%HADOOP_HOME%\bin` to `PATH`         |
+| `ModuleNotFoundError: dotenv`  | Run `pip install -r requirements.txt` inside your venv                                         |
+| Missing data files             | Place LANL `.bz2` / `.gz` files in `data/`, or set S3 input URIs in `.env`                     |
+| S3 access denied               | Verify AWS credentials in `.env`; ensure the IAM principal has `s3:GetObject` + `s3:PutObject` |
+| URLHaus fetch fails            | Check `URLHAUS_API_KEY` in `.env`; the pipeline continues with cached `urlhaus_sample.json`    |
+| Vectored I/O error             | Already handled in `spark_bootstrap.py`; clear `C:\tmp\spark\*` and retry                      |
 
-- **Ingest LANL DNS dataset (PySpark):** Ensure `data/dns.txt.gz` is present, then from project root:
+---
 
-  ```bash
-  # PySpark via Python
-  python src/ingestion/ingest_dns.py
+## Project Status
 
-  # or, using spark-submit if Spark is installed system-wide
-  spark-submit src/ingestion/ingest_dns.py
-  ```
+| Component                                     | Status |
+| --------------------------------------------- | ------ |
+| Data acquisition (URLHaus API)                | Done   |
+| Sample data generation                        | Done   |
+| LANL auth ingestion (~708M rows)              | Done   |
+| LANL DNS ingestion (~40.8M rows)              | Done   |
+| LANL flows ingestion                          | Done   |
+| LANL proc ingestion (~426M rows)              | Done   |
+| Silver layer (Parquet, Snappy)                | Done   |
+| Gold layer (enrichment + aggregation)         | Done   |
+| S3 integration (bronze / silver / gold)       | Done   |
+| Pipeline orchestration (`executepipeline.py`) | Done   |
+| Per-stage runtime tracking                    | Done   |
+| Analytics notebooks                           | Done   |
 
-  This script reads the compressed DNS file with a simple schema:
-  - `time` (integer, event time index)
-  - `SourceComputer` (string, source computer making the DNS query)
-  - `ComputerResolved` (string, de-identified computer/hostname resolved by DNS)
+---
 
-  Example output:
+## Author
 
-  ```text
-  root
-   |-- time: integer (nullable = true)
-   |-- SourceComputer: string (nullable = true)
-   |-- ComputerResolved: string (nullable = true)
-
-  +----+--------------+----------------+
-  |time|SourceComputer|ComputerResolved|
-  +----+--------------+----------------+
-  |2   |C4653         |C5030           |
-  |2   |C5782         |C16712          |
-  |6   |C1191         |C419            |
-  |15  |C3380         |C22841          |
-  |18  |C2436         |C5030           |
-  |31  |C161          |C2109           |
-  |35  |C5642         |C528            |
-  |38  |C3380         |C22841          |
-  |42  |C2428         |C1065           |
-  |42  |C2428         |C2109           |
-  +----+--------------+----------------+
-  only showing top 10 rows
-
-  Total rows: 40821591
-  Partitions: 1
-  ```
-
-  This demonstrates that the full LANL DNS dataset (~40.8M rows) can be ingested and distributed across Spark partitions for downstream processing.
-
-- **Ingest LANL flows dataset (PySpark):** Ensure `data/flows.txt.gz` is present, then from project root:
-
-  ```bash
-  # PySpark via Python
-  python src/ingestion/ingest_flows.py
-
-  # or, using spark-submit if Spark is installed system-wide
-  spark-submit src/ingestion/ingest_flows.py
-  ```
-
-  This script reads the compressed flows file with a schema:
-  - `time` (integer)
-  - `duration` (integer)
-  - `src_computer` (string)
-  - `src_port` (string)
-  - `dst_computer` (string)
-  - `dst_port` (string)
-  - `protocol` (string)
-  - `packets_count` (integer)
-  - `bytes_count` (integer)
-
-  Example output:
-
-  ```text
-  root
-   |-- time: integer (nullable = true)
-   |-- duration: integer (nullable = true)
-   |-- src_computer: string (nullable = true)
-   |-- src_port: string (nullable = true)
-   |-- dst_computer: string (nullable = true)
-   |-- dst_port: string (nullable = true)
-   |-- protocol: string (nullable = true)
-   |-- packets_count: integer (nullable = true)
-   |-- bytes_count: integer (nullable = true)
-
-  +----+--------+------------+--------+------------+--------+--------+-------------+-----------+
-  |time|duration|src_computer|src_port|dst_computer|dst_port|protocol|packets_count|bytes_count|
-  +----+--------+------------+--------+------------+--------+--------+-------------+-----------+
-  |1   |0       |C1065       |389     |C3799       |N10451  |6       |10           |5323       |
-  |1   |0       |C1423       |N1136   |C1707       |N1      |6       |5            |847        |
-  ...  |...     |...         |...     |...         |...     |...     |...          |...        |
-  +----+--------+------------+--------+------------+--------+--------+-------------+-----------+
-  only showing top 10 rows
-  ```
-
-  This demonstrates that the LANL flows dataset can be ingested and structured for downstream processing.
-
-- **Ingest LANL proc dataset (PySpark):** Ensure `data/proc.txt.gz` is present, then from project root:
-
-  ```bash
-  # PySpark via Python
-  python src/ingestion/ingest_proc.py
-
-  # or, using spark-submit if Spark is installed system-wide
-  spark-submit src/ingestion/ingest_proc.py
-  ```
-
-  This script reads the compressed proc file with a schema:
-  - `time` (integer)
-  - `user@domain` (string)
-  - `computer` (string)
-  - `processname` (string)
-  - `Start/End` (string)
-
-  Example output:
-
-  ```text
-  root
-   |-- time: integer (nullable = true)
-   |-- user@domain: string (nullable = true)
-   |-- computer: string (nullable = true)
-   |-- processname: string (nullable = true)
-   |-- Start/End: string (nullable = true)
-
-  +----+-----------+--------+-----------+---------+
-  |time|user@domain|computer|processname|Start/End|
-  +----+-----------+--------+-----------+---------+
-  |1   |C1$@DOM1   |C1      |P16        |Start    |
-  |1   |C1001$@DOM1|C1001   |P4         |Start    |
-  |1   |C1002$@DOM1|C1002   |P4         |Start    |
-  |1   |C1004$@DOM1|C1004   |P4         |Start    |
-  |1   |C1017$@DOM1|C1017   |P4         |Start    |
-  |1   |C1018$@DOM1|C1018   |P4         |Start    |
-  |1   |C1020$@DOM1|C1020   |P3         |Start    |
-  |1   |C1020$@DOM1|C1020   |P4         |Start    |
-  |1   |C1028$@DOM1|C1028   |P16        |End      |
-  |1   |C1029$@DOM1|C1029   |P4         |Start    |
-  +----+-----------+--------+-----------+---------+
-  only showing top 10 rows
-
-  Total rows: 426045096
-  Partitions: 1
-  ```
-
-  This demonstrates that the LANL proc dataset (~426M process events) can be ingested and structured for downstream processing.
-
-- **Write LANL silver (Parquet):** With the same raw files (or S3 URIs in `.env`), from project root:
-
-  ```bash
-  python src/processing/auth_to_parquet.py
-  python src/processing/dns_to_parquet.py
-  python src/processing/flows_to_parquet.py
-  python src/processing/proc_to_parquet.py
-  ```
-
-  Outputs go to `Parquet/auth`, `Parquet/dns`, etc., unless `SILVER_PARQUET_URI` is set (e.g. `s3a://your-bucket/silver` → `s3a://your-bucket/silver/auth`, …).
-
-- **URLHaus rows → S3 Parquet (boto3 example):** Set `S3_URLHAUS_BUCKET` (and optionally `S3_URLHAUS_KEY`, `AWS_REGION`) in `.env`, ensure AWS credentials are available, then run `python scripts/urlhaus_to_parquet.py`.
-
-- **Enrichment (Gold layer):** Correlate LANL data with URLHaus threat intelligence. Ensure Parquet silver layers exist, then from project root:
-
-  ```bash
-  python src/scripts/enrich.py
-  ```
-
-  This script performs a broadcast hash join to enrich events with threat indicators, outputting enriched data for analysis.
-
-- **Full pipeline (done):** Additional ingestion jobs (e.g. `load_lanl.py`), processing via `src/processing/enrich_logs.py`, and analysis in `notebooks/` — to be wired in later milestones.
-
-## Current status
-
-| Component                      | Status                                                                      |
-| ------------------------------ | --------------------------------------------------------------------------- |
-| Data acquisition (URLHaus API) | Done (`scripts/fetch_urlhaus.py`, output `sample data/urlhaus_sample.json`) |
-| Sample data generation         | Done (`scripts/create_samples.py`, output in `sample data/`)                |
-| Persistent storage             | Done (sample data and raw data paths documented above)                      |
-| LANL auth ingestion (PySpark)  | Done (`src/ingestion/ingest_auth_logs.py`, ~708M rows, 18 partitions)       |
-| LANL DNS ingestion (PySpark)   | Done (`src/ingestion/ingest_dns.py`, ~40.8M rows, 1 partition)              |
-| LANL flows ingestion (PySpark) | Done (`src/ingestion/ingest_flows.py`, reads `data/flows.txt.gz`)           |
-| LANL proc ingestion (PySpark)  | Done (`src/ingestion/ingest_proc.py`, ~426M rows, 1 partition)              |
-| LANL → Parquet (silver)        | Done (`src/processing/*_to_parquet.py`; paths configurable via `.env`)      |
-| Enrichment (gold)              | Done (`src/scripts/enrich.py`; correlates with URLHaus)                     |
-| Pipeline orchestration         | Done (M2)                                                                   |
-| Processing / enrichment        | Done (M3)                                                                   |
-| Analytics / querying           | Done (notebooks for threat hunting)                                         |
-
-## Pipeline Execution Sequence
-
-The pipeline follows a medallion architecture: Bronze (raw ingestion), Silver (normalized Parquet), Gold (enriched analytics-ready data). Here's the logical sequence to run the full pipeline:
-
-1. **Data Preparation**
-   - Ensure raw LANL files are in `data/` (e.g., `lanl-auth-dataset-1.bz2`, `dns.txt.gz`, etc.)
-   - Fetch threat intelligence: `python scripts/fetch_urlhaus.py`
-   - (Optional) Generate samples: `python scripts/create_samples.py`
-
-2. **Bronze Layer: Ingestion**
-   - Load LANL auth data: `python src/ingestion/ingest_auth_logs.py`
-   - Load LANL DNS data: `python src/ingestion/ingest_dns.py`
-   - Load LANL flows data: `python src/ingestion/ingest_flows.py`
-   - Load LANL proc data: `python src/ingestion/ingest_proc.py`
-
-3. **Silver Layer: Normalization**
-   - Convert auth to Parquet: `python src/processing/auth_to_parquet.py`
-   - Convert DNS to Parquet: `python src/processing/dns_to_parquet.py`
-   - Convert flows to Parquet: `python src/processing/flows_to_parquet.py`
-   - Convert proc to Parquet: `python src/processing/proc_to_parquet.py`
-
-4. **Gold Layer: Enrichment**
-   - Correlate with threats: `python src/scripts/enrich.py`
-
-5. **Analytics: Querying**
-   - Open `notebooks/threat_hunting.ipynb` for analysis and threat detection queries.
-
-**Notes:**
-
-- Each step depends on the previous; ensure DataFrames are created before Parquet writes, and Parquet exists before enrichment.
-- For large datasets, run on a cluster (e.g., EMR) with S3 paths configured in `.env`.
-- Monitor logs for errors; refer to `notes.txt` for troubleshooting.
-
-Metrics for Success
-Throughput: Total events processed per second.
-Latency: Total execution time for a 58-day log batch.
-Data Fidelity: Percentage of records successfully correlated with threat intel feeds.
-
-Author: Olaoluwa Adedamola Omodemi
-Institution: Kennesaw State University
-Department: College of Computing and Software Engineering
-Course: CS 4265 - Big Data Analytics
-Professor: Christopher Reagan
+**Olaoluwa Adedamola Omodemi**  
+Kennesaw State University — College of Computing and Software Engineering  
+CS 4265 — Big Data Analytics | Professor Christopher Reagan

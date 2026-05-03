@@ -16,6 +16,7 @@ data/*.gz
 data/*.bz2
 *.csv
 *.parquet
+Parquet/
 
 # OS
 .DS_Store
@@ -23,4 +24,9 @@ Thumbs.db
 
 # Virtual env
 venv/
+venv312/
 .env
+
+# Local notes
+M4.txt
+notes.txt
