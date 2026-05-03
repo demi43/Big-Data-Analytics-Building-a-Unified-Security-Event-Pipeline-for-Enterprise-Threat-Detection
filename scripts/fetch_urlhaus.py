@@ -34,8 +34,8 @@ def main():
     parser.add_argument(
         "--limit",
         type=int,
-        default=20,
-        help="Max number of URLs to fetch (1–1000, default 20)",
+        default=1000,
+        help="Max number of URLs to fetch (1–1000, default 1000)",
     )
     parser.add_argument(
         "--out",

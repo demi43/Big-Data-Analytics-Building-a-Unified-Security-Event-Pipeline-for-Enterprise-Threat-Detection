@@ -12,8 +12,8 @@ A scalable distributed data pipeline that ingests, processes, and enriches massi
 
 ```powershell
 # 1. Clone and set up the environment
-python -m venv venv
-.\venv\Scripts\Activate.ps1
+py -3.12 -m venv venv312
+.\venv312\Scripts\Activate.ps1
 pip install -r requirements.txt
 
 # 2. Configure credentials
@@ -48,7 +48,7 @@ python executepipeline.py --validate-only # validation and data quality report o
 | 1   | **URLHaus fetch**     | `scripts/fetch_urlhaus.py`       | `sample data/urlhaus_sample.json`      |
 | 2   | **URLHaus → Parquet** | inline (pandas + pyarrow)        | `Parquet/urlhaus/` or S3               |
 | 3   | **Silver layer**      | `src/processing/*_to_parquet.py` | `Parquet/{auth,dns,flows,proc}/` or S3 |
-| 4   | **Gold layer**        | `src/scripts/enrich.py`          | `Parquet/gold/user_activity_summary/`  |
+| 4   | **Gold layer**        | `src/scripts/enrich.py`          | S3: `bucket/gold/user_activity_summary/` |
 | 5   | **Validation**        | inline                           | record counts, sample rows, null rates |
 
 ### Example summary output
@@ -59,15 +59,15 @@ Pipeline Complete
 ============================================================
   Stage                  Status         Time
   ------------------------------------------
-  1  URLHaus fetch        OK            1.0s
-  2  URLHaus parquet      OK            2.3s
-  3  Silver layer         OK       27m 28.4s
-  4  Gold layer           OK       10m 47.1s
-  5  Validation           OK            9.1s
+  1  URLHaus fetch        OK            1.5s
+  2  URLHaus parquet      OK            1.3s
+  3  Silver layer         OK       29m 16.0s
+  4  Gold layer           OK       10m 49.6s
+  5  Validation           OK            8.8s
   ------------------------------------------
-  TOTAL                            38m 27.9s
+  TOTAL                            40m 17.2s
 
-  Started: 09:02:38 | Finished: 09:41:06 | Total time:38m 27.9s
+  Started: 11:06:54 | Finished: 11:47:11
 ```
 
 ---
@@ -90,7 +90,7 @@ Pipeline Complete
                                            │
                                            ▼
                                   ┌─────────────────┐
-                                  │  Gold            │  Parquet/gold/
+                                  │  Gold            │  S3: bucket/gold/
                                   │  Enrichment      │  user_activity_summary/
                                   └────────┬────────┘
                                            │
@@ -116,7 +116,7 @@ Pipeline Complete
 
 - **Bronze** — raw compressed LANL files (`data/`) or S3 `bucket/bronze/`
 - **Silver** — schema-validated Parquet (`Parquet/` or S3 `bucket/silver/`)
-- **Gold** — enriched aggregations joined with URLHaus IoCs (`Parquet/gold/` or S3 `bucket/gold/`)
+- **Gold** — enriched aggregations joined with URLHaus IoCs (S3 `bucket/gold/`)
 
 ---
 
@@ -128,7 +128,7 @@ Pipeline Complete
 | LANL DNS   | `.gz` CSV  | ~40.8M rows  | DNS resolution queries              |
 | LANL Flows | `.gz` CSV  | —            | Network flow records (9 fields)     |
 | LANL Proc  | `.gz` CSV  | ~426M rows   | Process start/end events            |
-| URLHaus    | JSON API   | 20–1000 URLs | Live malicious URL and host feed    |
+| URLHaus    | JSON API   | up to 1,000 URLs | Live malicious URL and host feed    |
 
 LANL dataset: <https://csr.lanl.gov/data/cyber1/>  
 URLHaus API: <https://urlhaus.abuse.ch/api/>
@@ -139,7 +139,7 @@ URLHaus API: <https://urlhaus.abuse.ch/api/>
 
 ### Requirements
 
-- Python 3.9+
+- Python 3.12 (recommended; 3.13 also works — avoid pre-release versions)
 - Java 11 or 17 (`JAVA_HOME` set, `%JAVA_HOME%\bin` on `PATH`)
 - Hadoop (optional on Windows; set `HADOOP_HOME` if Spark reports it missing)
 
@@ -190,6 +190,7 @@ These files are excluded from git (see `.gitignore`). Sample data for testing is
 /
 ├── executepipeline.py          # End-to-end pipeline runner (all 5 stages)
 ├── requirements.txt            # Pinned Python dependencies
+├── LICENSE                     # MIT License
 ├── .env.example                # Credential and path template (copy to .env)
 ├── .gitignore
 │
@@ -222,7 +223,7 @@ These files are excluded from git (see `.gitignore`). Sample data for testing is
 │   ├── create_samples.py       # Build small CSV samples from compressed data
 │   └── urlhaus_to_parquet.py   # Upload URLHaus JSON to S3 as Parquet (boto3)
 │
-├── Parquet/                    # Silver and Gold Parquet outputs (local mode)
+├── Parquet/                    # Local fallback outputs (when S3 URIs are unset)
 │   ├── auth/
 │   ├── dns/
 │   ├── flows/
@@ -231,9 +232,15 @@ These files are excluded from git (see `.gitignore`). Sample data for testing is
 │   └── gold/user_activity_summary/
 │
 ├── notebooks/
-│   └── threat_hunting.ipynb   # Interactive threat detection queries
+│   └── threat_hunting.ipynb        # Interactive threat detection queries
 │
-└── docs/                       # Milestone reports and architecture docs
+└── docs/
+    ├── validation.md               # Data quality report, test cases, performance
+    ├── data_dictionary.md          # Schema for all Bronze, Silver, and Gold datasets
+    ├── CS4265_Olaoluwa_Omodemi_M4.tex  # Final report (LaTeX source)
+    ├── CS42665_Olaoluwa_Omodemi_M1.pdf
+    ├── CS4265_Olaoluwa_Omodemi_M2.pdf
+    └── CS4265_Olaoluwa_Omodemi_M3.pdf
 ```
 
 ---

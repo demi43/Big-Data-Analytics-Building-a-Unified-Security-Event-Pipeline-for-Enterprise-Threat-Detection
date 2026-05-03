@@ -1,15 +1,23 @@
 #
-# Python dependencies for the Unified Security Event Pipeline (M2 baseline)
+# Python dependencies for the Unified Security Event Pipeline
+# Pinned to versions validated on 2026-05-03 (Python 3.12, Windows 11)
 #
-# Core big-data / processing stack
-pyspark
 
-# Data handling and utilities
-pandas
-pyarrow
-requests
-python-dotenv
-duckdb
+# Core distributed processing
+pyspark==4.1.1
 
-# AWS (S3 upload script)
-boto3
+# Data handling and serialization
+pandas==3.0.2
+pyarrow==24.0.0
+
+# HTTP (URLHaus API fetch)
+requests==2.33.1
+
+# Environment / configuration
+python-dotenv==1.2.2
+
+# AWS S3 (upload and credential management)
+boto3==1.43.0
+
+# Lightweight SQL analytics (notebooks)
+duckdb==1.5.2

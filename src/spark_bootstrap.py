@@ -140,6 +140,12 @@ def build_spark_session(
     b = b.config("spark.driver.memory", os.environ.get("SPARK_DRIVER_MEMORY", "2g"))
     b = b.config("spark.driver.maxResultSize", os.environ.get("SPARK_DRIVER_MAX_RESULT_SIZE", "1g"))
 
+    # Prevent BlockManagerMasterEndpoint idWithoutTopologyInfo NPE on Windows
+    b = b.config("spark.driver.host", "127.0.0.1")
+    b = b.config("spark.driver.bindAddress", "127.0.0.1")
+    b = b.config("spark.network.timeout", "800s")
+    b = b.config("spark.executor.heartbeatInterval", "60s")
+
     if master.startswith("local"):
         b = b.config("spark.executor.memory", "2g")
         b = b.config("spark.executor.cores", "2")

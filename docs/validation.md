@@ -3,7 +3,7 @@
 **CS 4265 Big Data Analytics | Olaoluwa Adedamola Omodemi**  
 **Run date:** 2026-05-03 | **Pipeline version:** M4  
 **Run command:** `python executepipeline.py`  
-**Started:** 09:02:38 | **Finished:** 09:41:06 | **Total time:** 38m 27.9s
+**Started:** 11:06:54 | **Finished:** 11:47:11 | **Total time:** 40m 17.2s
 
 ---
 
@@ -12,7 +12,7 @@
 | #     | Scenario                                                    | Method                                           | Result                                 |
 | ----- | ----------------------------------------------------------- | ------------------------------------------------ | -------------------------------------- |
 | TC-01 | Full pipeline runs end-to-end without manual intervention   | `python executepipeline.py`                      | PASS                                   |
-| TC-02 | URLHaus API fetch retrieves live threat records             | `scripts/fetch_urlhaus.py`                       | PASS — 20 URLs retrieved               |
+| TC-02 | URLHaus API fetch retrieves live threat records             | `scripts/fetch_urlhaus.py`                       | PASS — 1,000 URLs retrieved            |
 | TC-03 | URLHaus JSON converts to Parquet and uploads to S3          | Stage 2 inline (pandas + pyarrow + boto3)        | PASS                                   |
 | TC-04 | Auth dataset (708M rows, bzip2) ingests with correct schema | `auth_to_parquet.py`                             | PASS                                   |
 | TC-05 | DNS dataset (40.8M rows, gzip) ingests with correct schema  | `dns_to_parquet.py`                              | PASS                                   |
@@ -39,7 +39,7 @@
 | dns       | `dns.txt.gz`              | gzip        | **40,821,591**    | 1          |
 | flows     | `flows.txt.gz`            | gzip        | **129,977,412**   | 1          |
 | proc      | `proc.txt.gz`             | gzip        | **426,045,096**   | 1          |
-| urlhaus   | `urlhaus_sample.json`     | —           | **20**            | 1          |
+| urlhaus   | `urlhaus_sample.json`     | —           | **1000**          | 1          |
 | **TOTAL** |                           |             | **1,305,148,635** |            |
 
 ### 2.2 Gold Layer — user_activity_summary
@@ -208,13 +208,13 @@ join condition: flows.dst_computer == urlhaus.host
 
 **Description:** The Stage 5 validation reports `SKIP` for auth, dns, flows, proc, and urlhaus because they were written to S3 and the local validation uses pyarrow's local filesystem reader.  
 **Root cause:** pyarrow's `read_metadata()` does not natively traverse S3 paths without configuring `s3fs` credentials. The validation stage intentionally avoids a second Spark session to keep runtime short.  
-**Impact:** Silver record counts are confirmed at write time (via Spark's `df.count()`) but not re-verified post-write. Gold, which is written locally, is fully validated.  
-**Mitigation:** Run `python executepipeline.py --validate-only` after setting `SILVER_PARQUET_URI` to a local path, or use `aws s3 ls --recursive` to verify S3 object counts manually.
+**Impact:** Silver and Gold record counts are confirmed at write time (via Spark's `df.count()`) but not re-verified post-write by pyarrow. The Gold row count (1,883,499) is confirmed via pyarrow reading `Parquet/gold/` as a local cache copy; the authoritative copy is in S3.  
+**Mitigation:** Use `aws s3 ls --recursive s3://security-pipeline-lanl/gold/` to verify S3 object counts, or run `python executepipeline.py --validate-only` with S3 paths configured.
 
 ### Issue 3 — Non-Splittable Compression Limits Silver Parallelism
 
 **Description:** The auth (bzip2) and proc/dns/flows (gzip) source files cannot be split by Spark's input format, so each file is read as a single partition regardless of file size.  
-**Impact:** Auth reads at 1 partition (708M rows) and proc at 1 partition (426M rows), meaning only 1 core is active during the read phase even in `local[*]` mode. This is the primary bottleneck in the 27-minute Silver stage.  
+**Impact:** Auth reads at 1 partition (708M rows) and proc at 1 partition (426M rows), meaning only 1 core is active during the read phase even in `local[*]` mode. This is the primary bottleneck in the 29-minute Silver stage.  
 **Mitigation:** On EMR, use `spark-submit` with multiple executors and consider converting bronze files to a splittable format (e.g. LZ4-compressed CSV or uncompressed Parquet) in a one-time preprocessing step.
 
 ### Issue 4 — Spark Temp File Cleanup Warning on Windows
@@ -238,26 +238,26 @@ join condition: flows.dst_computer == urlhaus.host
 
 | Stage                              | Wall-clock Time | % of Total |
 | ---------------------------------- | --------------- | ---------- |
-| 1 — URLHaus fetch                  | 1.0s            | 0.04%      |
-| 2 — URLHaus → Parquet              | 2.3s            | 0.10%      |
-| 3 — Silver layer (total)           | 27m 28.4s       | 71.4%      |
-| &nbsp;&nbsp;&nbsp;auth_to_parquet  | 10m 55.4s       | 28.4%      |
-| &nbsp;&nbsp;&nbsp;dns_to_parquet   | 1m 12.4s        | 3.1%       |
-| &nbsp;&nbsp;&nbsp;flows_to_parquet | 4m 45.7s        | 12.4%      |
-| &nbsp;&nbsp;&nbsp;proc_to_parquet  | 10m 35.0s       | 27.5%      |
-| 4 — Gold layer                     | 10m 47.1s       | 28.0%      |
-| 5 — Validation                     | 9.1s            | 0.39%      |
-| **TOTAL**                          | **38m 27.9s**   | 100%       |
+| 1 — URLHaus fetch                  | 1.5s            | 0.06%      |
+| 2 — URLHaus → Parquet              | 1.3s            | 0.05%      |
+| 3 — Silver layer (total)           | 29m 16.0s       | 72.7%      |
+| &nbsp;&nbsp;&nbsp;auth_to_parquet  | 10m 52.7s       | 27.0%      |
+| &nbsp;&nbsp;&nbsp;dns_to_parquet   | 1m 22.6s        | 3.4%       |
+| &nbsp;&nbsp;&nbsp;flows_to_parquet | 5m 11.8s        | 12.9%      |
+| &nbsp;&nbsp;&nbsp;proc_to_parquet  | 11m 48.9s       | 29.3%      |
+| 4 — Gold layer                     | 10m 49.6s       | 26.9%      |
+| 5 — Validation                     | 8.8s            | 0.36%      |
+| **TOTAL**                          | **40m 17.2s**   | 100%       |
 
 ### 5.2 Throughput (Silver Stage)
 
 | Dataset      | Records           | Time         | Throughput                |
 | ------------ | ----------------- | ------------ | ------------------------- |
-| auth         | 708,304,516       | 655.4s       | ~1,081,000 rows/sec       |
-| dns          | 40,821,591        | 72.4s        | ~564,000 rows/sec         |
-| flows        | 129,977,412       | 285.7s       | ~455,000 rows/sec         |
-| proc         | 426,045,096       | 635.0s       | ~671,000 rows/sec         |
-| **Combined** | **1,305,147,615** | **1,648.5s** | **~791,000 rows/sec avg** |
+| auth         | 708,304,516       | 652.7s       | ~1,085,000 rows/sec       |
+| dns          | 40,821,591        | 82.6s        | ~494,000 rows/sec         |
+| flows        | 129,977,412       | 311.8s       | ~417,000 rows/sec         |
+| proc         | 426,045,096       | 708.9s       | ~601,000 rows/sec         |
+| **Combined** | **1,305,148,615** | **1,756.0s** | **~743,000 rows/sec avg** |
 
 ### 5.3 Resource Usage
 
@@ -268,8 +268,8 @@ join condition: flows.dst_computer == urlhaus.host
 | Driver heap      | 8 GB (`SPARK_DRIVER_MEMORY=8g`)                    |
 | Max result size  | 2 GB (`SPARK_DRIVER_MAX_RESULT_SIZE=2g`)           |
 | Spark temp dir   | `C:\tmp\spark\`                                    |
-| Storage — Silver | Amazon S3 `us-east-2` (cloud)                      |
-| Storage — Gold   | Local `Parquet/gold/` (31.8 MB)                    |
+| Storage — Silver | Amazon S3 `us-east-2` — `s3://security-pipeline-lanl/silver/` |
+| Storage — Gold   | Amazon S3 `us-east-2` — `s3://security-pipeline-lanl/gold/`   |
 | JARs             | `hadoop-aws:3.3.4`, `aws-java-sdk-bundle:1.12.262` |
 | OS               | Windows 11 Pro 10.0.26200                          |
 

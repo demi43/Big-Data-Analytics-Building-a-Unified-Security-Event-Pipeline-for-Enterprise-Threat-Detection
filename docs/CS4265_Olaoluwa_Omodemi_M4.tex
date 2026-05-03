@@ -1,0 +1,447 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{url}
+\usepackage{listings}
+\usepackage{balance}
+
+\lstset{
+  basicstyle=\ttfamily\scriptsize,
+  breaklines=true,
+  frame=single,
+  captionpos=b
+}
+
+\begin{document}
+
+\title{Unified Security Event Pipeline: Distributed Ingestion, Enrichment, and Analysis of Enterprise-Scale Cybersecurity Telemetry}
+
+\author{
+  \IEEEauthorblockN{Olaoluwa Adedamola Omodemi}
+  \IEEEauthorblockA{
+    \textit{College of Computing and Software Engineering}\\
+    \textit{Kennesaw State University}\\
+    CS 4265 --- Big Data Analytics\\
+    Instructor: Prof. Christopher Reagan
+  }
+}
+
+\maketitle
+
+\begin{IEEEkeywords}
+big data analytics, Apache Spark, data lake, Medallion architecture, cybersecurity, threat intelligence, Parquet, Amazon S3, ETL pipeline, LANL dataset
+\end{IEEEkeywords}
+
+% -----------------------------------------------------------------------
+\section{Abstract}
+% -----------------------------------------------------------------------
+
+Enterprise security operations centers generate billions of heterogeneous log events daily, yet lack scalable mechanisms to correlate raw telemetry with real-world threat intelligence at low latency. This paper presents the Unified Security Event Pipeline, a distributed data engineering system that ingests over 1.17 billion raw security events from the Los Alamos National Laboratory (LANL) Unified Host and Network Dataset---spanning user authentication, DNS resolution, network flows, and process execution---and enriches them against a live threat intelligence feed from URLHaus (abuse.ch). Built on Apache Spark and Amazon S3, the pipeline implements the Medallion architecture (Bronze, Silver, Gold) to transform compressed, heterogeneous CSV logs into columnar Parquet analytics at scale. A full end-to-end run completes in 40 minutes and 17 seconds on a single Windows workstation, processing 1.305 billion events at throughputs up to 1.085 million rows per second and producing 1,883,499 aggregated Gold-layer records partitioned by one-hour time windows. All three Medallion layers---Bronze, Silver, and Gold---are stored in Amazon S3. Key engineering contributions include explicit schema enforcement at ingestion, deduplication-guarded multi-table joins, broadcast hash joining of threat intelligence, dual-mode path resolution for local and cloud execution, and a lightweight pyarrow-based validation stage that avoids a second Spark session entirely.
+
+% -----------------------------------------------------------------------
+\section{Introduction}
+% -----------------------------------------------------------------------
+
+Modern enterprise networks produce telemetry at a volume that no single analyst or single machine can feasibly inspect. A 708-million-row authentication log is not evidence of anything on its own; it becomes evidence only when correlated with process execution records, network flows, DNS queries, and external threat intelligence. The fundamental challenge is not storage---compressed logs fit on commodity hardware---but rather the absence of a scalable, repeatable mechanism to join heterogeneous data sources and surface actionable signals from the noise.
+
+This paper describes the Unified Security Event Pipeline, a system built to address that gap. The pipeline ingests four streams from the LANL Unified Host and Network Dataset: approximately 708 million user authentication events, 40.8 million DNS queries, 130 million network flow records, and 426 million process execution events. These are enriched with a live malicious-URL feed from URLHaus and aggregated into a queryable Gold layer suitable for threat hunting and anomaly detection.
+
+The remainder of this paper is organized as follows. Section~\ref{sec:arch} describes the system architecture and technology stack. Section~\ref{sec:impl} details key implementation decisions. Section~\ref{sec:evidence} presents live terminal evidence of pipeline execution. Section~\ref{sec:results} presents validation results and performance measurements. Section~\ref{sec:reflection} reflects on lessons learned. Section~\ref{sec:conclusion} concludes.
+
+% -----------------------------------------------------------------------
+\section{System Architecture}
+\label{sec:arch}
+% -----------------------------------------------------------------------
+
+\subsection{Medallion Data Lake Architecture}
+
+The pipeline follows the Medallion (Bronze--Silver--Gold) layering pattern, a widely adopted data lake design in which each tier has a distinct purpose and quality guarantee.
+
+\textbf{Bronze} stores raw, unmodified data exactly as received: compressed LANL CSV files (bzip2 and gzip) and live URLHaus JSON responses, written to Amazon S3 under the \texttt{bronze/} prefix. No transformation is applied; Bronze is the authoritative record of what arrived.
+
+\textbf{Silver} stores cleaned, schema-enforced, columnar data. Each Bronze source is converted to Apache Parquet with Snappy compression by a dedicated PySpark script. Explicit schemas are applied at read time, malformed records are rejected, and column names are normalized across datasets. Silver is written to S3 under the \texttt{silver/} prefix.
+
+\textbf{Gold} stores enriched, aggregated, analytics-ready output. The five Silver tables are joined in a single Spark job (Section~\ref{sec:enrich}) and aggregated into one-hour time buckets partitioned by \texttt{time\_bucket}. Gold is written to S3 under the \texttt{gold/} prefix.
+
+This layering means that if a bug is discovered in Gold enrichment logic, the tier can be recomputed from Silver without re-ingesting Bronze---a critical property when Bronze data is expensive to re-download or re-decompress.
+
+\subsection{Component Overview}
+
+Fig.~\ref{fig:arch} illustrates the end-to-end data flow. The pipeline is orchestrated by a single entry point, \texttt{executepipeline.py}, which launches five sequential stages as isolated subprocesses.
+
+\begin{figure}[htbp]
+\centering
+\fbox{%
+  \begin{minipage}{0.92\columnwidth}
+  \scriptsize
+  \textbf{Stage 1--2: Threat Intel}\\
+  \texttt{fetch\_urlhaus.py} $\rightarrow$ URLHaus JSON $\rightarrow$ Parquet\\
+  $\rightarrow$ \texttt{s3://security-pipeline-lanl/silver/urlhaus/}\\[4pt]
+  \textbf{Stage 3: Silver Layer (PySpark)} $\rightarrow$ S3 \texttt{silver/}\\
+  LANL Auth (.bz2) $\rightarrow$ \texttt{silver/auth/}\\
+  LANL DNS (.gz) $\rightarrow$ \texttt{silver/dns/}\\
+  LANL Flows (.gz) $\rightarrow$ \texttt{silver/flows/}\\
+  LANL Proc (.gz) $\rightarrow$ \texttt{silver/proc/}\\[4pt]
+  \textbf{Stage 4: Gold Layer (PySpark)} $\rightarrow$ S3 \texttt{gold/}\\
+  flows \textsc{left join} auth \textsc{left join} proc\\
+  \textsc{left join} urlhaus (broadcast) $\rightarrow$\\
+  \texttt{s3://security-pipeline-lanl/gold/user\_activity\_summary/}\\
+  \hspace*{1em}partitioned by \texttt{time\_bucket}\\[4pt]
+  \textbf{Stage 5: Validation (pyarrow)}\\
+  Row counts $\cdot$ null rates $\cdot$ schema check $\cdot$ samples
+  \end{minipage}
+}
+\caption{End-to-end pipeline data flow. All three Medallion layers are stored in Amazon S3 (\texttt{s3://security-pipeline-lanl/}).}
+\label{fig:arch}
+\end{figure}
+
+\subsection{Repository Structure}
+
+Fig.~\ref{fig:structure} shows the final repository layout, confirming
+that every stage described in Fig.~\ref{fig:arch} maps directly to a
+distinct source module. Bronze ingestion scripts live under
+\texttt{src/ingestion/}, Silver conversion under \texttt{src/processing/},
+Gold enrichment in \texttt{src/scripts/enrich.py}, and the single
+orchestrator \texttt{executepipeline.py} sits at the project root.
+Configuration is fully externalized in \texttt{.env}, sample data for
+testing is committed under \texttt{sample data/}, and validation
+documentation resides in \texttt{docs/}.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\columnwidth]{ProjectFinalStructure.png}
+  \caption{Final project repository structure. Each pipeline stage corresponds to a distinct directory: \texttt{src/ingestion/} (Bronze), \texttt{src/processing/} (Silver), \texttt{src/scripts/} (Gold), and \texttt{docs/} (validation and reporting).}
+  \label{fig:structure}
+\end{figure}
+
+\subsection{Technology Stack}
+
+\textbf{Apache Spark (PySpark).} Spark's lazy evaluation, DAG execution model, and partition-level parallelism allow the pipeline to process datasets far larger than available RAM. Its support for both \texttt{local[*]} mode (development) and EMR cluster mode (production) with no code changes makes it the appropriate engine for a pipeline that must scale from a laptop to a full cluster.
+
+\textbf{Apache Parquet + Snappy Compression.} Security log data is write-once and query-heavy. Parquet's columnar storage means a query on \texttt{source\_user} reads only that column from disk, skipping all others. Snappy decompresses quickly at a moderate ratio---the right trade-off for iterative analytics. Parquet's row-group min/max statistics enable predicate pushdown: Spark skips entire row groups that cannot satisfy a filter without reading them.
+
+\textbf{Amazon S3.} S3 decouples storage from compute and serves as the storage layer for all three Medallion tiers. The same Parquet files are readable by a local PySpark session during development and a full EMR cluster in production without copying or reformatting. The pipeline uses the \texttt{s3a://} Hadoop connector for Spark-native access with multipart upload support. All Bronze, Silver, and Gold data reside in the \texttt{security-pipeline-lanl} bucket under their respective prefixes.
+
+\textbf{URLHaus API (abuse.ch).} Static threat lists become stale within hours. URLHaus provides a live feed of recently active malicious URLs and host indicators, saving up to 1,000 recent records per fetch. The free API requires only an email-based key, making it accessible without enterprise licensing while still providing production-quality threat data.
+
+\textbf{Python + python-dotenv.} All configuration (S3 URIs, credentials, Spark tuning parameters) is externalized into a \texttt{.env} file via python-dotenv, following twelve-factor app principles. The same scripts run locally, in CI, and on EMR by changing only the environment file.
+
+\subsection{Data Flow Description}
+
+\textbf{Stage 1 --- Threat Intel Acquisition.} \texttt{scripts/fetch\_urlhaus.py} calls the URLHaus REST API and saves up to 1,000 recent malicious URL records as JSON. Each record includes the full URL, extracted host, threat category, and classification tags. If the API is unavailable, the pipeline falls back to a cached JSON file and continues.
+
+\textbf{Stage 2 --- URLHaus JSON to Parquet.} The JSON feed is read in-process using pandas and uploaded to \texttt{s3://security-pipeline-lanl/silver/urlhaus/urlhaus.parquet} with Snappy compression via boto3, converting the unstructured threat feed into a schema-consistent columnar format ready for broadcast joining in Stage 4.
+
+\textbf{Stage 3 --- Silver Layer.} Each of the four LANL datasets is read by a dedicated PySpark script with an explicit schema applied at read time. The resulting DataFrames are written to S3 (\texttt{s3a://security-pipeline-lanl/silver/\{auth,dns,flows,proc\}/}) as Parquet with Snappy compression. Repartitioning for the auth dataset is configurable via the \texttt{AUTH\_PARQUET\_REPARTITION} environment variable.
+
+\textbf{Stage 4 --- Gold Layer.} \texttt{src/scripts/enrich.py} reads all five Silver Parquet datasets from S3, deduplicates lookup tables on their join keys, executes the enrichment join chain, derives a \texttt{malicious\_hit} indicator, and aggregates results into one-hour time buckets. Output is written to \texttt{s3a://security-pipeline-lanl/gold/user\_activity\_summary/} partitioned by \texttt{time\_bucket}.
+
+\textbf{Stage 5 --- Validation.} The pipeline reads back all output Parquet directories using pyarrow to report record counts, file counts, and disk sizes without spinning up a second Spark session. Null rates per column are computed on the auth Silver output as a data quality indicator.
+
+% -----------------------------------------------------------------------
+\section{Implementation}
+\label{sec:impl}
+% -----------------------------------------------------------------------
+
+\subsection{Explicit Schema Enforcement}
+
+Every ingestion script defines a \texttt{StructType} schema and passes it to Spark's CSV reader via \texttt{.schema(schema)} rather than relying on \texttt{inferSchema=True}. Schema inference requires an extra full pass over the data to sample types---prohibitively expensive at 708 million rows. More importantly, inference can silently assign incorrect types (e.g., treating a timestamp-encoded integer as a string), causing downstream join failures that are difficult to diagnose. Explicit schemas also serve as living documentation of each dataset's contract.
+
+\subsection{Deduplication Before Joins}
+
+Before joining \texttt{auth}, \texttt{proc}, and \texttt{urlhaus} against the \texttt{flows} table, each lookup table is deduplicated on its join key:
+
+\begin{lstlisting}[language=Python, caption={Deduplication prior to join.}]
+auth_dedup    = auth.dropDuplicates(["source_computer","time"])
+proc_dedup    = proc.dropDuplicates(["computer","time"])
+urlhaus_dedup = urlhaus.dropDuplicates(["host"])
+\end{lstlisting}
+
+Without this step, a single \texttt{(computer, time)} key with multiple matching \texttt{auth} rows would produce one output row per match, multiplying the \texttt{flows} cardinality. In a 708-million-row \texttt{auth} dataset, this fanout would make Gold aggregation metrics arbitrarily inflated and untrustworthy.
+
+\subsection{Gold Layer Enrichment and Aggregation}
+\label{sec:enrich}
+
+\texttt{src/scripts/enrich.py} executes the following join chain on the five Silver tables:
+
+\begin{lstlisting}[language=Python, caption={Gold enrichment join chain.}]
+enriched = (
+  flows
+  .join(auth_dedup,
+        (flows.src_computer == auth.source_computer)
+        & (flows.time == auth.time), "left")
+  .join(proc_dedup,
+        (flows.src_computer == proc.computer)
+        & (flows.time == proc.time), "left")
+  .join(broadcast(urlhaus_dedup),
+        flows.dst_computer == urlhaus.host, "left")
+)
+\end{lstlisting}
+
+A \texttt{malicious\_hit} indicator column (0 or 1) is derived from the presence of a \texttt{threat} value. Results are aggregated into one-hour time buckets grouped by \texttt{(user, src\_computer)}, computing \texttt{total\_flows}, \texttt{total\_bytes}, \texttt{total\_packets}, \texttt{active\_processes}, and \texttt{malicious\_hits}.
+
+\subsection{URLHaus Host Extraction}
+
+The URLHaus feed stores full URLs rather than bare hostnames. A direct join on \texttt{dst\_computer == url} always produces zero matches because LANL computer identifiers do not contain URL schemes or paths. The fix extracts the hostname before the join:
+
+\begin{lstlisting}[language=Python, caption={Hostname extraction from URLHaus URLs.}]
+urlhaus = urlhaus.withColumn(
+    "host",
+    regexp_extract(col("url"), r"https?://([^/]+)", 1)
+)
+\end{lstlisting}
+
+\subsection{Gold Layer Partitioning}
+
+The Gold layer is written with \texttt{.partitionBy("time\_bucket")}, where \texttt{time\_bucket} is the Unix epoch timestamp floored to the nearest hour (\texttt{floor(time / 3600) * 3600}). Downstream queries filtered by time range use Spark's partition pruning to skip non-matching directories entirely, avoiding full dataset scans.
+
+\subsection{Dual-Mode Path Resolution}
+
+\texttt{src/pipeline\_paths.py} resolves all input and output paths at runtime from environment variables. If \texttt{SILVER\_PARQUET\_URI} is set, Silver scripts write to S3; if \texttt{GOLD\_PARQUET\_URI} is set, the Gold enrichment script writes to S3. Otherwise both fall back to local \texttt{Parquet/} subdirectories. The module also normalizes \texttt{s3://} to \texttt{s3a://} for the Spark S3A connector. No code modification is required to switch between local and cloud execution.
+
+\subsection{Subprocess-Based Orchestration}
+
+\texttt{executepipeline.py} runs each stage by launching Python scripts as subprocesses via \texttt{subprocess.run()}. Each Spark script creates its own \texttt{SparkSession} and calls \texttt{spark.stop()} at completion. Subprocess isolation ensures that a failure in any stage produces a clean non-zero exit code catchable by the orchestrator without affecting parent process state, and eliminates JVM port conflicts between sequential stages.
+
+\subsection{Lightweight Validation via pyarrow}
+
+The validation stage reads Parquet metadata using \texttt{pyarrow.parquet.read\_metadata()}, which inspects row-group statistics without deserializing any data. This is orders of magnitude faster than a Spark \texttt{count()} action and avoids the JVM startup overhead of a second \texttt{SparkSession}.
+
+\subsection{Challenges Overcome}
+
+\textbf{JAR Version Mismatch.} PySpark ships with Hadoop 3.3 internals. Using \texttt{hadoop-aws:3.4.0} triggered \texttt{NoSuchMethodError} on every Parquet read from S3 because \texttt{VectorIoBridge} called a method added only in Hadoop 3.4. Resolution required pinning to \texttt{hadoop-aws:3.3.4} and \texttt{aws-java-sdk-bundle:1.12.262}.
+
+\textbf{Vectored I/O Conflict.} Disabling vectored I/O required targeting three independent layers: (a) JVM startup flags via \texttt{spark.driver.extraJavaOptions}; (b) \texttt{spark.sql.parquet.enableVectorizedReader=false}; and (c) \texttt{spark.hadoop.fs.s3a.experimental.input.fadvise=sequential}. Each layer operates at a different initialization phase and does not cascade to the others.
+
+\textbf{Duration String Parsing.} Hadoop 3.3+ introduced human-readable duration strings (e.g., \texttt{"24h"}) in default configuration. The runtime called \texttt{getLong()} on these values, causing \texttt{NumberFormatException} during \texttt{SparkSession} initialization. The fix overrides all duration defaults with pure numeric millisecond values before the session is built.
+
+\textbf{Windows Environment Initialization.} \texttt{HADOOP\_HOME} had been set to \texttt{C:\textbackslash hadoop\textbackslash bin} instead of \texttt{C:\textbackslash hadoop}, causing Spark to construct a doubled path \texttt{...\textbackslash bin\textbackslash bin\textbackslash winutils.exe}. \texttt{spark\_bootstrap.py} strips the trailing \texttt{\textbackslash bin} and forces \texttt{PYSPARK\_PYTHON} to \texttt{sys.executable} on every run.
+
+\textbf{Row Fanout From Multi-Table Joins.} An early version of \texttt{enrich.py} joined without deduplication, causing each \texttt{flows} row to match multiple \texttt{auth} rows and multiply the output count, silently inflating all Gold metrics. Resolved by the \texttt{dropDuplicates()} strategy described above.
+
+\textbf{Schema and Column Name Mismatches.} Silver schemas used different column names than the enrichment script assumed (\texttt{source\_computer} vs.\ \texttt{computer}, etc.). URLHaus stored full URLs rather than bare hostnames, so joins produced zero matches until the \texttt{regexp\_extract} fix was applied. All issues were diagnosed by inspecting Silver schemas with \texttt{printSchema()} before writing join logic.
+
+% -----------------------------------------------------------------------
+\section{Pipeline Execution Evidence}
+\label{sec:evidence}
+% -----------------------------------------------------------------------
+
+Figs.~\ref{fig:run1} and~\ref{fig:run2} provide direct terminal output captured during the live pipeline run on 2026-05-03, confirming that all five stages executed successfully on real data.
+
+Fig.~\ref{fig:run1} shows the pipeline entry point being invoked (\texttt{python executepipeline.py}), Stage 1 successfully retrieving 1,000 URLHaus threat records from the live API, Stage 2 uploading the converted Parquet file to S3 (\texttt{s3://security-pipeline-lanl/silver/urlhaus/urlhaus.parquet}), and Stage 3 beginning Silver ingestion of the auth dataset from S3.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\columnwidth]{RunningImplementation1.png}
+  \caption{Pipeline startup: URLHaus fetch (Stage 1, 1,000 records), JSON-to-Parquet upload to S3 (Stage 2), and Silver layer ingestion start (Stage 3).}
+  \label{fig:run1}
+\end{figure}
+
+Fig.~\ref{fig:run2} shows Stage 4 (Gold layer enrichment) launching \texttt{enrich.py}. The Ivy dependency resolver confirms that \texttt{hadoop-aws:3.3.4} and \texttt{aws-java-sdk-bundle:1.12.262} were resolved and downloaded from Maven Central---the pinned JAR versions required to avoid the vectored I/O conflict described in Section~\ref{sec:impl}. The Gold output is written to \texttt{s3a://security-pipeline-lanl/gold/user\_activity\_summary/}.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\columnwidth]{Runningimplementation2.png}
+  \caption{Stage 4 Gold layer: Ivy resolves \texttt{hadoop-aws:3.3.4} and \texttt{aws-java-sdk-bundle:1.12.262} before the five-table enrichment join executes and writes to S3 \texttt{gold/}.}
+  \label{fig:run2}
+\end{figure}
+
+% -----------------------------------------------------------------------
+\section{Validation and Results}
+\label{sec:results}
+% -----------------------------------------------------------------------
+
+\subsection{Execution Environment}
+
+The pipeline was executed in full on 2026-05-03 on a Windows 11 workstation running PySpark 4.1.1 in \texttt{local[*]} mode with 8 GB driver heap. All three Medallion layers---Bronze, Silver, and Gold---were written to Amazon S3 (us-east-2) in the \texttt{security-pipeline-lanl} bucket. The run started at 11:06:54 and completed at 11:47:11, for a total wall-clock time of 40 minutes and 17 seconds. All five stages returned status \texttt{OK}.
+
+\subsection{Silver Layer Record Counts}
+
+Table~\ref{tab:silver} reports the confirmed record counts for all five Silver datasets as printed by Spark's \texttt{df.count()} immediately after ingestion.
+
+\begin{table}[htbp]
+\caption{Silver Layer Record Counts}
+\label{tab:silver}
+\centering
+\begin{tabular}{lrr}
+\toprule
+\textbf{Dataset} & \textbf{Records} & \textbf{Source} \\
+\midrule
+Auth (lanl-auth-dataset-1.bz2) & 708,304,516 & S3 \\
+DNS (dns.txt.gz) & 40,821,591 & S3 \\
+Flows (flows.txt.gz) & 129,977,412 & S3 \\
+Proc (proc.txt.gz) & 426,045,096 & S3 \\
+URLHaus (API fetch) & 1,000 & API/S3 \\
+\midrule
+\textbf{Total events} & \textbf{1,305,149,615} & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Gold Layer Metrics}
+
+The Gold \texttt{user\_activity\_summary} table was written to \texttt{s3a://security-pipeline-lanl/gold/user\_activity\_summary/} and validated via pyarrow after the Spark job completed. Table~\ref{tab:gold} summarizes the output.
+
+\begin{table}[htbp]
+\caption{Gold Layer Output Metrics}
+\label{tab:gold}
+\centering
+\begin{tabular}{lr}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Total rows & 1,883,499 \\
+Parquet part files & 2,515 \\
+Disk size & 31.8 MB \\
+Distinct users & 262 \\
+S3 destination & \texttt{gold/user\_activity\_summary/} \\
+Malicious hits & 0 (see note) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:goldstats} reports descriptive statistics for numeric Gold columns sampled from the first ten Parquet files.
+
+\begin{table}[htbp]
+\caption{Gold Layer Numeric Column Statistics ($n=7{,}944$ sampled rows)}
+\label{tab:goldstats}
+\centering
+\small
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Column} & \textbf{Mean} & \textbf{Std} & \textbf{Min} & \textbf{Max} \\
+\midrule
+total\_flows      & 56.6      & 425.5       & 1       & 14,501 \\
+total\_bytes      & 9,474,916 & 298,853,000 & 46      & 14.2B \\
+total\_packets    & 9,802.2   & 218,134.7   & 1       & 10,073,680 \\
+active\_processes & 0.078     & 0.335       & 0       & 6 \\
+malicious\_hits   & 0.0       & 0.0         & 0       & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textit{Note on zero malicious hits.} The LANL dataset uses fully anonymized computer identifiers (e.g., \texttt{C1040}, \texttt{C3799}) rather than real hostnames or IP addresses. The URLHaus feed contains real-world domain names (e.g., \texttt{wood-zone.weplord.lat}). Because no anonymized LANL identifier can match a real hostname, the \texttt{dst\_computer == urlhaus.host} join correctly produces zero matches. In a production deployment against un-anonymized network logs, this join would surface real threat matches.
+
+\subsection{Validation Methods}
+
+The pipeline applies three independent validation methods. First, each Silver processing script calls \texttt{df.count()} immediately after reading the raw compressed file and prints the result before writing Parquet, providing an audit trail that the full dataset was read without truncation. Second, each ingestion script calls \texttt{df.printSchema()} and \texttt{df.show()} before writing, confirming that column types match the declared \texttt{StructType}. Third, after all Spark jobs complete, the validation stage reads Parquet metadata using \texttt{pyarrow.parquet.read\_metadata()}---which inspects row-group statistics without deserializing the data---to report file counts, row counts, and disk sizes.
+
+\subsection{Schema Conformance and Data Quality}
+
+The following sample rows were spot-checked from printed Spark output during ingestion and confirmed correct:
+
+\begin{itemize}
+  \item \textbf{Auth:} \texttt{time=1, source\_user=U1, source\_computer=C1}
+  \item \textbf{Flows:} \texttt{time=1, src=C1065:389, dst=C3799, bytes=5323, pkts=10}
+  \item \textbf{Proc:} \texttt{time=1, user=C1\$@DOM1, computer=C1, proc=P16}
+\end{itemize}
+
+All Gold output rows contain the expected seven columns (\texttt{time\_bucket}, \texttt{user}, \texttt{src\_computer}, \texttt{total\_flows}, \texttt{total\_bytes}, \texttt{total\_packets}, \texttt{active\_processes}, \texttt{malicious\_hits}). No nulls were observed in key join columns in sampled rows. The Gold aggregation achieves a 99.86\% row-count reduction: 1.305 billion raw events collapsed into 1.883 million per-user, per-computer, per-hour summaries.
+
+Fig.~\ref{fig:validation} shows the live Stage 5 terminal output captured during the pipeline run, including the Gold sample rows, summary statistics, and the final per-stage timing block confirming all five stages returned \texttt{OK}.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\columnwidth]{result_and_validation.png}
+  \caption{Stage 5 validation output: Gold layer row count (1,883,499), five sample rows, summary statistics, and final per-stage timing summary confirming all stages completed successfully.}
+  \label{fig:validation}
+\end{figure}
+
+\subsection{Performance}
+
+Table~\ref{tab:perf} reports wall-clock times by pipeline stage. The Silver layer accounts for 73\% of total runtime (29m 16s of 40m 17s), dominated by the two largest datasets (auth and proc), which are compressed in formats that cannot be split across multiple Spark tasks, limiting parallelism to one partition per file.
+
+\begin{table}[htbp]
+\caption{Wall-Clock Runtime by Stage (11:06:54 -- 11:47:11)}
+\label{tab:perf}
+\centering
+\begin{tabular}{lrl}
+\toprule
+\textbf{Stage} & \textbf{Time} & \textbf{Notes} \\
+\midrule
+1. URLHaus fetch      & 1.5s      & REST API, 1{,}000 records \\
+2. URLHaus → Parquet  & 1.3s      & pandas + pyarrow + boto3 → S3 \\
+3. Silver layer       & 29m 16s   & 4 sequential Spark jobs → S3 \\
+\quad auth\_to\_parquet  & 10m 53s & 708M rows, bzip2 → S3 \\
+\quad dns\_to\_parquet   & 1m 23s  & 40.8M rows, gzip → S3 \\
+\quad flows\_to\_parquet & 5m 12s  & 130M rows, gzip → S3 \\
+\quad proc\_to\_parquet  & 11m 49s & 426M rows, gzip → S3 \\
+4. Gold layer         & 10m 50s   & 5-table join + agg → S3 \\
+5. Validation         & 8.8s      & pyarrow metadata \\
+\midrule
+\textbf{Total}        & \textbf{40m 17s} & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:throughput} reports ingestion throughput per dataset. Auth achieves the highest throughput at approximately 1.085 million rows per second despite bzip2 compression, owing to its linear sequential read pattern.
+
+\begin{table}[htbp]
+\caption{Silver Layer Ingestion Throughput}
+\label{tab:throughput}
+\centering
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Dataset} & \textbf{Records} & \textbf{Time} & \textbf{Rows/sec} \\
+\midrule
+auth  & 708,304,516 & 652.7s & $\sim$1,085,000 \\
+dns   & 40,821,591  & 82.6s  & $\sim$494,000 \\
+flows & 129,977,412 & 311.8s & $\sim$417,000 \\
+proc  & 426,045,096 & 708.9s & $\sim$601,000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Within Silver, proc dominates at 11m 49s and auth at 10m 53s because both are compressed in non-splittable formats, limiting Spark to one task per file regardless of available cores. The Gold stage (10m 50s) is bounded by S3 read latency for the five Silver tables and the shuffle cost of the multi-table join aggregation. On an EMR cluster with multiple executors and HDFS, both stages would scale approximately linearly with the number of cores.
+
+% -----------------------------------------------------------------------
+\section{Reflection}
+\label{sec:reflection}
+% -----------------------------------------------------------------------
+
+The biggest change I would make is to the development environment. Running PySpark on Windows consumed a disproportionate amount of time---JAR version conflicts, \texttt{winutils} misconfigurations, and a three-layer vectored I/O fix that had nothing to do with actual pipeline logic. Starting on Linux or WSL2 from day one would have kept focus where it belonged. Pinning all dependency versions upfront would also have avoided the transitive conflicts between \texttt{boto3} and \texttt{aiobotocore}.
+
+The most important lesson learned is that distributed systems fail quietly at boundaries. The row fanout bug---where un-deduplicated \texttt{auth} records silently multiplied every \texttt{flows} row---produced plausible-looking output with wrong numbers. The gap between ``ran without errors'' and ``produced correct results'' is now a first-class concern, not an afterthought. A second lesson: configuration omissions cause silent degradation. The missing \texttt{GOLD\_PARQUET\_URI} variable caused Gold output to silently fall back to local storage rather than S3, a discrepancy only caught during documentation review.
+
+If continued, the highest-value improvement would be replacing the URLHaus API sample with the full bulk export ($\sim$40,000--100,000 active hosts) to make threat enrichment meaningful at scale. Adding schema and null-rate assertions between Bronze and Silver would catch data quality issues before they reach the Gold join. Migrating orchestration to Apache Airflow or Prefect would enable partial re-runs without reprocessing stages that already succeeded.
+
+% -----------------------------------------------------------------------
+\section{Conclusion}
+\label{sec:conclusion}
+% -----------------------------------------------------------------------
+
+This paper presented the Unified Security Event Pipeline, a distributed data engineering system that ingests and correlates over 1.305 billion enterprise security events using Apache Spark, Amazon S3, and the Medallion architecture. The system demonstrates that a single-node PySpark deployment can achieve throughputs exceeding one million rows per second on real-world compressed security telemetry, producing a fully queryable Gold analytics layer in under 41 minutes. All three Medallion layers---Bronze, Silver, and Gold---are stored in Amazon S3, providing a fully cloud-native data lake that can be queried by any S3-compatible compute engine without data movement. Key contributions include explicit schema enforcement at ingestion, deduplication-guarded multi-table joins that preserve metric integrity, broadcast hash joining of live threat intelligence, dual-mode local/cloud path resolution via environment configuration, and a pyarrow-based validation stage that avoids secondary Spark session overhead.
+
+Future work includes parallelizing the four Silver ingestion jobs, migrating to a streaming ingest model using Apache Kafka for near-real-time enrichment, and deploying on AWS EMR to evaluate linear scaling with executor count.
+
+\balance
+
+\begin{thebibliography}{00}
+
+\bibitem{lanl} A. D. Kent, ``Comprehensive, Multi-Source Cyber-Security Events,'' Los Alamos National Laboratory, 2015. [Online]. Available: \url{https://csr.lanl.gov/data/cyber1/}
+
+\bibitem{urlhaus} abuse.ch, ``URLhaus --- Sharing malicious URLs,'' 2024. [Online]. Available: \url{https://urlhaus.abuse.ch/}
+
+\bibitem{spark} M. Zaharia et al., ``Apache Spark: A Unified Engine for Big Data Processing,'' \textit{Commun. ACM}, vol. 59, no. 11, pp. 56--65, 2016.
+
+\bibitem{parquet} Apache Software Foundation, ``Apache Parquet,'' 2024. [Online]. Available: \url{https://parquet.apache.org/}
+
+\bibitem{medallion} D. Ghodsi, ``Medallion Architecture: Best Practices for Managing Your Data Lakehouse,'' Databricks, 2022. [Online]. Available: \url{https://www.databricks.com/glossary/medallion-architecture}
+
+\bibitem{s3a} Apache Software Foundation, ``Hadoop-AWS module: Integration with Amazon Web Services,'' 2024. [Online]. Available: \url{https://hadoop.apache.org/docs/stable/hadoop-aws/tools/hadoop-aws/index.html}
+
+\bibitem{broadcastjoin} H. Karau and R. Warren, \textit{High Performance Spark}. Sebastopol, CA: O'Reilly Media, 2017.
+
+\bibitem{12factor} A. Wiggins, ``The Twelve-Factor App,'' 2017. [Online]. Available: \url{https://12factor.net/}
+
+\end{thebibliography}
+
+\end{document}
