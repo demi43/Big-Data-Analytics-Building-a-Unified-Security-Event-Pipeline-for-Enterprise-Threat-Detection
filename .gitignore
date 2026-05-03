@@ -5,7 +5,7 @@
 *.crc
 __pycache__/
 *.pyc
-
+docs/CS4265_Olaoluwa_Omodemi_M4.tex
 # Jupyter
 .ipynb_checkpoints/
 

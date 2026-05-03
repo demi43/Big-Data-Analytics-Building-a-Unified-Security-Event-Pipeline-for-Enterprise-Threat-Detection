@@ -188,14 +188,19 @@ These files are excluded from git (see `.gitignore`). Sample data for testing is
 
 ```
 /
-├── executepipeline.py          # End-to-end pipeline runner (all 5 stages)
-├── requirements.txt            # Pinned Python dependencies
-├── LICENSE                     # MIT License
-├── .env.example                # Credential and path template (copy to .env)
+├── executepipeline.py              # End-to-end pipeline runner (all 5 stages)
+├── requirements.txt                # Pinned Python dependencies
+├── LICENSE                         # MIT License
+├── .env.example                    # Credential and path template (copy to .env)
 ├── .gitignore
 │
-├── data/                       # Raw compressed LANL files (not committed)
-├── sample data/                # Small samples committed for testing
+├── data/                           # Raw compressed LANL files (not committed)
+│   ├── lanl-auth-dataset-1.bz2
+│   ├── dns.txt.gz
+│   ├── flows.txt.gz
+│   └── proc.txt.gz
+│
+├── sample data/                    # Small samples committed for testing
 │   ├── auth_sample.txt
 │   ├── dns_sample.txt
 │   ├── flows_sample.txt
@@ -203,33 +208,29 @@ These files are excluded from git (see `.gitignore`). Sample data for testing is
 │   └── urlhaus_sample.json
 │
 ├── src/
-│   ├── pipeline_paths.py       # Resolve bronze/silver/gold paths; s3:// → s3a://
-│   ├── spark_bootstrap.py      # SparkSession factory (Windows + S3A fixes)
-│   ├── ingestion/              # Bronze layer — read and validate raw data
+│   ├── pipeline_paths.py           # Resolve bronze/silver/gold paths; s3:// → s3a://
+│   ├── spark_bootstrap.py          # SparkSession factory (Windows + S3A fixes)
+│   ├── ingestion/                  # Bronze layer — read and validate raw data
 │   │   ├── ingest_auth_logs.py
 │   │   ├── ingest_dns.py
 │   │   ├── ingest_flows.py
 │   │   └── ingest_proc.py
-│   ├── processing/             # Silver layer — CSV/bz2 → Parquet
+│   ├── processing/                 # Silver layer — CSV/bz2 → Parquet
 │   │   ├── auth_to_parquet.py
 │   │   ├── dns_to_parquet.py
 │   │   ├── flows_to_parquet.py
 │   │   └── proc_to_parquet.py
-│   └── scripts/
-│       └── enrich.py           # Gold layer — join flows + auth + proc + URLHaus IoCs
+│   ├── scripts/
+│   │   ├── enrich.py               # Gold layer — join flows + auth + proc + URLHaus
+│   │   └── gold.py                 # Gold layer utilities
+│   └── stores/                     # HBase schema (future integration)
 │
 ├── scripts/
-│   ├── fetch_urlhaus.py        # Fetch threat intel from URLHaus API
-│   ├── create_samples.py       # Build small CSV samples from compressed data
-│   └── urlhaus_to_parquet.py   # Upload URLHaus JSON to S3 as Parquet (boto3)
+│   ├── fetch_urlhaus.py            # Fetch threat intel from URLHaus API
+│   ├── create_samples.py           # Build small CSV samples from compressed data
+│   └── urlhaus_to_parquet.py       # Upload URLHaus JSON to S3 as Parquet (boto3)
 │
-├── Parquet/                    # Local fallback outputs (when S3 URIs are unset)
-│   ├── auth/
-│   ├── dns/
-│   ├── flows/
-│   ├── proc/
-│   ├── urlhaus/
-│   └── gold/user_activity_summary/
+├── Parquet/                        # Local fallback outputs (when S3 URIs are unset)
 │
 ├── notebooks/
 │   └── threat_hunting.ipynb        # Interactive threat detection queries
@@ -237,7 +238,8 @@ These files are excluded from git (see `.gitignore`). Sample data for testing is
 └── docs/
     ├── validation.md               # Data quality report, test cases, performance
     ├── data_dictionary.md          # Schema for all Bronze, Silver, and Gold datasets
-    ├── CS4265_Olaoluwa_Omodemi_M4.tex  # Final report (LaTeX source)
+    ├── CS4265_Olaoluwa_Omodemi_M4.tex  # M4 final report (LaTeX source)
+    ├── CS4265_Olaoluwa_Omodemi_M4.pdf  # M4 final report (compiled)
     ├── CS42665_Olaoluwa_Omodemi_M1.pdf
     ├── CS4265_Olaoluwa_Omodemi_M2.pdf
     └── CS4265_Olaoluwa_Omodemi_M3.pdf

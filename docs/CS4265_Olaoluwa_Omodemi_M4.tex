@@ -13,6 +13,18 @@
 \usepackage{listings}
 \usepackage{balance}
 
+% Section / subsection title styling
+\usepackage{titlesec}
+\titleformat{\section}
+  {\normalfont\large\bfseries\centering}
+  {\Roman{section}.}{0.5em}{\MakeUppercase}
+\titleformat{\subsection}
+  {\normalfont\normalsize\bfseries}
+  {\Alph{subsection}.}{0.5em}{}
+\titleformat{\subsubsection}
+  {\normalfont\small\bfseries\itshape}
+  {\arabic{subsubsection})}{0.4em}{}
+
 \lstset{
   basicstyle=\ttfamily\scriptsize,
   breaklines=true,
